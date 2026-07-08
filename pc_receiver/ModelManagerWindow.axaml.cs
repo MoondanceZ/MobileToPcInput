@@ -79,6 +79,8 @@ public partial class ModelManagerWindow : Window
     {
         var isLoaded = model.Id == _getLoadedModelId();
         var isBusy = _getOperationSnapshot().IsRunning;
+        var isSharedReady = model.IsPunctuationDownloaded && model.IsVadDownloaded;
+        var isReady = model.IsDownloaded && isSharedReady;
         var accent = model.IsSupported && (model.IsDownloaded || isLoaded) ? "#1769E0" : "#A0AEC0";
         var background = isLoaded ? "#EEF6FF" : "White";
         var border = isLoaded ? "#83B6FF" : "#DDE6F1";
@@ -93,7 +95,7 @@ public partial class ModelManagerWindow : Window
         };
         var desc = new TextBlock
         {
-            Text = model.Description,
+            Text = $"{model.Description}  状态：ASR {(model.IsDownloaded ? "已就绪" : "未下载")} · 标点 {(model.IsPunctuationDownloaded ? "已就绪" : "未下载")} · VAD {(model.IsVadDownloaded ? "已就绪" : "未下载")}",
             FontSize = 12,
             Foreground = Brush("#718096"),
             TextWrapping = TextWrapping.Wrap
@@ -102,11 +104,11 @@ public partial class ModelManagerWindow : Window
         {
             MinHeight = 36,
             Padding = new Thickness(14, 8),
-            Content = !model.IsSupported ? "待支持" : isLoaded ? "已加载" : model.IsDownloaded ? "加载" : "缺少",
+            Content = !model.IsSupported ? "待支持" : isLoaded ? "已加载" : !model.IsDownloaded ? "下载" : !isSharedReady ? "补齐" : "加载",
             IsEnabled = model.IsSupported && !isLoaded && !isBusy,
-            Background = isLoaded ? Brush("#E6EEF8") : Brush("#1769E0"),
+            Background = isLoaded ? Brush("#E6EEF8") : isReady ? Brush("#1769E0") : Brush("#0F8A6A"),
             Foreground = isLoaded ? Brush("#536174") : Brushes.White,
-            BorderBrush = isLoaded ? Brush("#D6E0EC") : Brush("#1769E0"),
+            BorderBrush = isLoaded ? Brush("#D6E0EC") : isReady ? Brush("#1769E0") : Brush("#0F8A6A"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
             FontWeight = FontWeight.SemiBold

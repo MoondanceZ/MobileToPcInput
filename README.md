@@ -4,6 +4,10 @@ Flutter Android 手机麦克风 + Avalonia Windows 接收器。手机通过 WiFi
 `16kHz / mono / 16-bit PCM` 音频，电脑端使用 C# ONNX Paraformer 本机离线识别，
 并把识别文本直接输入到当前光标位置。
 
+## 参考项目
+
+- C# Paraformer 运行时参考：[FunASR AliParaformerAsr](https://github.com/modelscope/FunASR/blob/main/runtime/csharp/AliParaformerAsr/README.md)
+
 ## 项目结构
 
 - `mobile_app`: Flutter Android App，输入电脑 IP/端口，按住说话发送音频。
@@ -24,13 +28,6 @@ Flutter Android 手机麦克风 + Avalonia Windows 接收器。手机通过 WiFi
 cd D:\Workspace\Test\MobileToPcInput\pc_receiver
 dotnet build
 dotnet run
-```
-
-检查本地 ASR 模型：
-
-```powershell
-cd D:\Workspace\Test\MobileToPcInput\pc_receiver
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-asr.ps1
 ```
 
 PC 端 AOT 发布和 MSI 打包：

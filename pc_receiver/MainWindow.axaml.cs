@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly AudioReceiverServer _server = new();
     private readonly AsrSessionBuffer _asrBuffer = new();
     private readonly ParaformerAsrService _asrService = new();
+    private readonly ModelDownloadService _modelDownloadService = new();
     private readonly StartupService _startupService = new();
     private readonly TrayIcon _trayIcon;
     private readonly NativeMenuItem _trayStartItem;
@@ -247,14 +248,33 @@ public partial class MainWindow : Window
         }
 
         DeviceBox.SelectedItem = model;
-        var wasDownloaded = model.IsDownloaded;
+        var wasDownloaded = model.IsDownloaded && model.IsPunctuationDownloaded && model.IsVadDownloaded;
         SetModelOperation(
             isRunning: true,
-            message: wasDownloaded ? $"正在加载 {model.DisplayName}..." : $"缺少 {model.DisplayName}，请先放置模型文件...",
-            progress: wasDownloaded ? 35 : 8,
-            isIndeterminate: false);
+            message: wasDownloaded ? "正在加载模型..." : "正在准备模型...",
+            progress: wasDownloaded ? 35 : 2,
+            isIndeterminate: !wasDownloaded);
         try
         {
+            if (!wasDownloaded)
+            {
+                var progress = new Progress<ModelDownloadProgress>(item =>
+                {
+                    SetModelOperation(
+                        isRunning: true,
+                        message: item.Message,
+                        progress: Math.Min(item.Progress, 70),
+                        isIndeterminate: item.IsIndeterminate);
+                });
+                await _modelDownloadService.DownloadRequiredModelsAsync(model, progress);
+                RefreshModels();
+            }
+
+            SetModelOperation(
+                isRunning: true,
+                message: "正在加载模型...",
+                progress: 72,
+                isIndeterminate: false);
             await WarmUpAsrAsync(model);
             SetModelOperation(
                 isRunning: false,
@@ -350,26 +370,26 @@ public partial class MainWindow : Window
         if (message.Contains("loading C# ONNX model", StringComparison.OrdinalIgnoreCase))
         {
             progress = Math.Max(progress, 55);
-            text = "正在加载 C# ONNX 语音模型...";
-            statusText = "正在加载 C# ONNX 语音模型...";
+            text = "正在加载模型...";
+            statusText = "正在加载模型...";
         }
         else if (message.Contains("C# ONNX model ready", StringComparison.OrdinalIgnoreCase))
         {
-            progress = Math.Max(progress, 98);
-            text = "C# ONNX 模型已就绪...";
-            statusText = "语音模型已就绪";
+            progress = Math.Max(progress, 70);
+            text = "正在加载模型...";
+            statusText = "正在加载模型...";
         }
         else if (message.Contains("loading punctuation model", StringComparison.OrdinalIgnoreCase))
         {
             progress = Math.Max(progress, 82);
-            text = "正在加载标点恢复模型...";
-            statusText = "正在加载标点恢复模型...";
+            text = "正在加载模型...";
+            statusText = "正在加载模型...";
         }
         else if (message.Contains("punctuation model ready", StringComparison.OrdinalIgnoreCase))
         {
             progress = Math.Max(progress, 98);
-            text = "标点恢复模型已就绪...";
-            statusText = "语音和标点模型已就绪";
+            text = "模型已就绪...";
+            statusText = "模型已就绪";
         }
         else if (message.Contains("C# ONNX recognition starting", StringComparison.OrdinalIgnoreCase))
         {
@@ -577,8 +597,7 @@ public partial class MainWindow : Window
             _isAsrReady = false;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                var verb = model.IsDownloaded ? "加载" : "查找";
-                SetStatus($"● 正在{verb}语音模型...", "#1769E0", "#EEF6FF");
+                SetStatus("● 正在加载模型...", "#1769E0", "#EEF6FF");
                 ManageModelButton.IsEnabled = false;
                 DeviceBox.IsEnabled = false;
             });
@@ -592,11 +611,11 @@ public partial class MainWindow : Window
                 DeviceBox.IsEnabled = !StopButton.IsEnabled;
                 if (!StopButton.IsEnabled)
                 {
-                    SetStatus("● 未监听，语音模型已就绪", "#C13830", "#FFF1F0");
+                    SetStatus("● 未监听，模型已就绪", "#C13830", "#FFF1F0");
                 }
                 else
                 {
-                    StatusText.Text = "语音模型已就绪";
+                    StatusText.Text = "模型已就绪";
                 }
             });
         }
@@ -608,7 +627,7 @@ public partial class MainWindow : Window
             {
                 ManageModelButton.IsEnabled = true;
                 DeviceBox.IsEnabled = !StopButton.IsEnabled;
-                StatusText.Text = $"语音模型加载失败: {ex.Message}";
+                StatusText.Text = $"模型加载失败: {ex.Message}";
             });
         }
     }
@@ -620,7 +639,7 @@ public partial class MainWindow : Window
         {
             _isAsrReady = false;
             AppLogger.Info($"ASR startup warm-up skipped because model is not downloaded. model={model.Id}");
-            StatusText.Text = "语音模型未下载，请先打开模型管理";
+            StatusText.Text = "模型未下载，请先打开模型管理";
             return;
         }
 

@@ -7,6 +7,7 @@ namespace pc_receiver;
 public static class AppLogger
 {
     private static readonly object Gate = new();
+
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "MobileToPcInput",
@@ -14,7 +15,9 @@ public static class AppLogger
 
     public static void Info(string message)
     {
+#if DEBUG
         Write("INFO", message);
+#endif
     }
 
     public static void Error(string message, Exception ex)
