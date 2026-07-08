@@ -13,9 +13,10 @@ void main() {
   testWidgets('shows receiver form and push-to-talk button', (tester) async {
     await tester.pumpWidget(const MobileToPcInputApp());
 
-    expect(find.text('手机麦克风'), findsOneWidget);
     expect(find.text('电脑接收器'), findsOneWidget);
+    expect(find.text('扫码'), findsOneWidget);
     expect(find.text('电脑 IP'), findsOneWidget);
     expect(find.text('按住说话'), findsOneWidget);
+    expect(find.text('扫描或输入电脑端显示的 IP 和端口'), findsOneWidget);
   });
 }
