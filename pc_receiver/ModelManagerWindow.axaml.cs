@@ -236,9 +236,10 @@ public partial class ModelManagerWindow : Window
         StatusText.Text = string.IsNullOrWhiteSpace(snapshot.Message)
             ? "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。"
             : snapshot.Message;
-        DownloadProgress.IsVisible = snapshot.IsRunning;
-        DownloadProgress.IsIndeterminate = snapshot.IsIndeterminate;
-        DownloadProgress.Value = snapshot.Progress;
+        var showProgress = snapshot.IsRunning && snapshot.Progress < 100;
+        DownloadProgress.IsVisible = showProgress;
+        DownloadProgress.IsIndeterminate = showProgress && snapshot.IsIndeterminate;
+        DownloadProgress.Value = showProgress ? snapshot.Progress : 0;
     }
 
     private void CloseButton_Click(object? sender, RoutedEventArgs e)

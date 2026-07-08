@@ -16,6 +16,7 @@ public sealed class AsrModelOption
     public string Revision { get; init; } = "v2.0.5";
     public bool IsSupported { get; init; } = true;
     public bool IsDownloaded => IsSupported && AsrModelCatalog.IsModelDownloaded(AsrModel);
+    public bool CanSelectInPicker => IsDownloaded;
     public bool IsPunctuationDownloaded => IsSupported && AsrModelCatalog.IsPunctuationModelDownloaded(PunctuationModel);
     public bool IsVadDownloaded => IsSupported && AsrModelCatalog.IsVadModelDownloaded(VadModel);
 

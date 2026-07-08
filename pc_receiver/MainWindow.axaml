@@ -70,10 +70,15 @@
       <Setter Property="BoxShadow" Value="0 10 22 0 #1A273B30" />
     </Style>
     <Style Selector="ComboBoxItem">
+      <Setter Property="IsEnabled" Value="{ReflectionBinding CanSelectInPicker}" />
       <Setter Property="Padding" Value="0" />
       <Setter Property="Margin" Value="4,3" />
       <Setter Property="CornerRadius" Value="9" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="ComboBoxItem:disabled">
+      <Setter Property="Opacity" Value="0.48" />
       <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ComboBoxItem:pointerover">

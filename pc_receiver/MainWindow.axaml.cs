@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
@@ -31,6 +32,8 @@ public partial class MainWindow : Window
     private bool _isRecognizing;
     private bool _isAsrReady;
     private bool _isModelOperationRunning;
+    private bool _isRefreshingModels;
+    private bool _isApplyingSelectedModel;
     private string _modelOperationMessage = "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。";
     private double _modelOperationProgress;
     private bool _modelOperationIsIndeterminate;
@@ -56,7 +59,7 @@ public partial class MainWindow : Window
         SetAppImages();
         StartupBox.IsChecked = _startupService.IsEnabled();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
-        DeviceBox.SelectionChanged += (_, _) => UpdateModelUi();
+        DeviceBox.SelectionChanged += async (_, _) => await ApplySelectedModelAsync();
         PortBox.TextChanged += (_, _) => UpdateConnectQrCode();
         _asrService.WorkerStatusChanged += OnAsrWorkerStatus;
 
@@ -169,6 +172,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!await EnsureSelectedModelReadyAsync())
+        {
+            return;
+        }
+
         try
         {
             await _server.StartAsync(port);
@@ -200,12 +208,20 @@ public partial class MainWindow : Window
     private void RefreshModels()
     {
         var selectedId = GetSelectedModel()?.Id ?? _asrService.CurrentModel.Id;
-        DeviceBox.ItemsSource = null;
-        DeviceBox.ItemsSource = AsrModelCatalog.Models.ToArray();
-        DeviceBox.SelectedItem = AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
-            ?? AsrModelCatalog.DefaultModel;
-        HintText.Text = "当前使用本机离线语音识别；模型可在“模型管理”中维护。";
-        UpdateModelUi();
+        _isRefreshingModels = true;
+        try
+        {
+            DeviceBox.ItemsSource = null;
+            DeviceBox.ItemsSource = AsrModelCatalog.Models.ToArray();
+            DeviceBox.SelectedItem = AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
+                ?? AsrModelCatalog.DefaultModel;
+            HintText.Text = "当前使用本机离线语音识别；模型可在“模型管理”中维护。";
+            UpdateModelUi();
+        }
+        finally
+        {
+            _isRefreshingModels = false;
+        }
     }
 
     private void StopServer()
@@ -247,8 +263,13 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("正在录音或识别中，完成后再切换模型");
         }
 
-        DeviceBox.SelectedItem = model;
         var wasDownloaded = model.IsDownloaded && model.IsPunctuationDownloaded && model.IsVadDownloaded;
+        var shouldLoadAfterDownload = wasDownloaded || !_isAsrReady;
+        if (shouldLoadAfterDownload)
+        {
+            DeviceBox.SelectedItem = model;
+        }
+
         SetModelOperation(
             isRunning: true,
             message: wasDownloaded ? "正在加载模型..." : "正在准备模型...",
@@ -268,8 +289,19 @@ public partial class MainWindow : Window
                 });
                 await _modelDownloadService.DownloadRequiredModelsAsync(model, progress);
                 RefreshModels();
+
+                if (!shouldLoadAfterDownload)
+                {
+                    SetModelOperation(
+                        isRunning: false,
+                        message: $"已下载 {model.DisplayName}",
+                        progress: 100,
+                        isIndeterminate: false);
+                    return;
+                }
             }
 
+            DeviceBox.SelectedItem = model;
             SetModelOperation(
                 isRunning: true,
                 message: "正在加载模型...",
@@ -439,6 +471,94 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        if (!model.IsSupported)
+        {
+            HintText.Text = "这个模型入口已预留，当前版本暂不支持。";
+            return;
+        }
+
+        HintText.Text = model.IsDownloaded
+            ? $"当前选择：{model.DisplayName}。"
+            : $"当前选择：{model.DisplayName}，模型未下载，请先打开“模型管理”下载。";
+    }
+
+    private async Task ApplySelectedModelAsync()
+    {
+        if (_isRefreshingModels || _isApplyingSelectedModel)
+        {
+            UpdateModelUi();
+            return;
+        }
+
+        var model = GetSelectedModel();
+        if (model is null)
+        {
+            return;
+        }
+
+        UpdateModelUi();
+        if (model.Id == _asrService.CurrentModel.Id)
+        {
+            return;
+        }
+
+        _isApplyingSelectedModel = true;
+        try
+        {
+            if (!model.IsSupported)
+            {
+                _isAsrReady = false;
+                await _asrService.StopWorkerAsync();
+                SetStatus("● 当前模型暂不支持", "#C13830", "#FFF1F0");
+                return;
+            }
+
+            if (!model.IsDownloaded)
+            {
+                _isAsrReady = false;
+                await _asrService.StopWorkerAsync();
+                SetStatus("● 模型未下载，请先打开模型管理", "#C13830", "#FFF1F0");
+                return;
+            }
+
+            await WarmUpAsrAsync(model);
+        }
+        finally
+        {
+            _isApplyingSelectedModel = false;
+        }
+    }
+
+    private async Task<bool> EnsureSelectedModelReadyAsync()
+    {
+        var model = GetSelectedModel();
+        if (model is null)
+        {
+            StatusText.Text = "请选择语音模型";
+            return false;
+        }
+
+        if (!model.IsSupported)
+        {
+            _isAsrReady = false;
+            StatusText.Text = "当前选择的模型暂不支持";
+            return false;
+        }
+
+        if (!model.IsDownloaded)
+        {
+            _isAsrReady = false;
+            StatusText.Text = "当前选择的模型未下载，请先打开模型管理";
+            return false;
+        }
+
+        if (!_isAsrReady || _asrService.CurrentModel.Id != model.Id)
+        {
+            await WarmUpAsrAsync(model);
+        }
+
+        return _isAsrReady && _asrService.CurrentModel.Id == model.Id;
     }
 
     private void SetAppImages()
@@ -609,6 +729,7 @@ public partial class MainWindow : Window
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 SetStatus("● 正在加载模型...", "#1769E0", "#EEF6FF");
+                StartButton.IsEnabled = false;
                 ManageModelButton.IsEnabled = false;
                 DeviceBox.IsEnabled = false;
             });
@@ -618,6 +739,7 @@ public partial class MainWindow : Window
             AppLogger.Info($"ASR warm-up completed. model={model.Id}");
             Dispatcher.UIThread.Post(() =>
             {
+                StartButton.IsEnabled = !StopButton.IsEnabled;
                 ManageModelButton.IsEnabled = true;
                 DeviceBox.IsEnabled = !StopButton.IsEnabled;
                 if (!StopButton.IsEnabled)
@@ -636,6 +758,7 @@ public partial class MainWindow : Window
             AppLogger.Error("ASR warm-up failed", ex);
             Dispatcher.UIThread.Post(() =>
             {
+                StartButton.IsEnabled = !StopButton.IsEnabled;
                 ManageModelButton.IsEnabled = true;
                 DeviceBox.IsEnabled = !StopButton.IsEnabled;
                 StatusText.Text = $"模型加载失败: {ex.Message}";
@@ -691,9 +814,134 @@ public partial class MainWindow : Window
         Hide();
     }
 
-    private void CloseButton_Click(object? sender, RoutedEventArgs e)
+    private async void CloseButton_Click(object? sender, RoutedEventArgs e)
     {
-        Close();
+        var shouldClose = await ShowCloseConfirmationAsync();
+        if (shouldClose)
+        {
+            ExitApplication();
+        }
+    }
+
+    private async Task<bool> ShowCloseConfirmationAsync()
+    {
+        var dialog = new Window
+        {
+            Width = 360,
+            Height = 188,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            WindowDecorations = WindowDecorations.None,
+            Background = Brushes.Transparent,
+            TransparencyLevelHint =
+            [
+                WindowTransparencyLevel.Transparent,
+                WindowTransparencyLevel.AcrylicBlur,
+                WindowTransparencyLevel.None
+            ]
+        };
+
+        var titleBar = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto")
+        };
+        titleBar.Children.Add(new TextBlock
+        {
+            Text = "确认关闭",
+            FontSize = 18,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = Brush("#1C2739"),
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        var closeButton = new Button
+        {
+            Width = 34,
+            Height = 30,
+            MinHeight = 30,
+            Padding = new Thickness(0),
+            Content = "×",
+            FontSize = 16,
+            Background = Brush("#F8FAFC"),
+            Foreground = Brush("#1F334D"),
+            BorderBrush = Brush("#D6E0EC"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(9),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        closeButton.Click += (_, _) => dialog.Close(false);
+        Grid.SetColumn(closeButton, 1);
+        titleBar.Children.Add(closeButton);
+
+        var cancelButton = new Button
+        {
+            MinHeight = 36,
+            Padding = new Thickness(16, 8),
+            Content = "取消",
+            Background = Brush("#F8FAFC"),
+            Foreground = Brush("#1F334D"),
+            BorderBrush = Brush("#D6E0EC"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            FontWeight = FontWeight.SemiBold
+        };
+        cancelButton.Click += (_, _) => dialog.Close(false);
+
+        var confirmButton = new Button
+        {
+            MinHeight = 36,
+            Padding = new Thickness(16, 8),
+            Content = "关闭",
+            Background = Brush("#C13830"),
+            Foreground = Brushes.White,
+            BorderBrush = Brush("#C13830"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            FontWeight = FontWeight.SemiBold
+        };
+        confirmButton.Click += (_, _) => dialog.Close(true);
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 8
+        };
+        actions.Children.Add(cancelButton);
+        actions.Children.Add(confirmButton);
+
+        var content = new StackPanel
+        {
+            Spacing = 18
+        };
+        content.Children.Add(titleBar);
+        content.Children.Add(new TextBlock
+        {
+            Text = "关闭会停止监听并退出程序。需要后台运行时，请点击最小化到托盘。",
+            FontSize = 13,
+            Foreground = Brush("#536174"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        content.Children.Add(actions);
+
+        dialog.Content = new Border
+        {
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(20),
+            Background = Brushes.White,
+            BorderBrush = Brush("#D8E1EC"),
+            BorderThickness = new Thickness(1),
+            BoxShadow = new BoxShadows(new BoxShadow
+            {
+                Blur = 28,
+                OffsetY = 14,
+                Color = Color.Parse("#2D17263B")
+            }),
+            Child = content
+        };
+
+        return await dialog.ShowDialog<bool>(this);
     }
 
     private void DragWindow(object? sender, PointerPressedEventArgs e)
