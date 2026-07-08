@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -17,6 +18,8 @@ public partial class MainWindow : Window
 {
     private readonly AudioOutputService _audioOutput = new();
     private readonly AudioReceiverServer _server = new();
+    private readonly AsrSessionBuffer _asrBuffer = new();
+    private readonly ParaformerAsrService _asrService = new();
     private readonly StartupService _startupService = new();
     private readonly TrayIcon _trayIcon;
     private readonly NativeMenuItem _trayStartItem;
@@ -24,6 +27,8 @@ public partial class MainWindow : Window
     private readonly NativeMenuItem _trayStartupItem;
     private const double TopDragHeight = 156;
     private bool _allowClose;
+    private bool _isRecognizing;
+    private bool _isAsrReady;
 
     public MainWindow()
     {
@@ -44,6 +49,7 @@ public partial class MainWindow : Window
         SetAppImages();
         StartupBox.IsChecked = _startupService.IsEnabled();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
+        DeviceBox.SelectionChanged += (_, _) => UpdateModelUi();
 
         _trayStartItem = new NativeMenuItem("开始监听");
         _trayStopItem = new NativeMenuItem("停止监听") { IsEnabled = false };
@@ -55,7 +61,9 @@ public partial class MainWindow : Window
         _trayIcon = CreateTrayIcon();
 
         IpText.Text = NetworkAddressHelper.GetDisplayText();
-        RefreshDevices();
+        RefreshModels();
+        ClearAudioCache(showStatus: false);
+        Loaded += (_, _) => _ = WarmUpAsrOnStartupAsync();
 
         _server.ClientStateChanged += connected =>
         {
@@ -74,7 +82,10 @@ public partial class MainWindow : Window
                 if (!connected)
                 {
                     LevelBar.Value = 0;
-                    VocoTypeController.ReleaseIfHeld();
+                    if (_asrBuffer.IsRecording)
+                    {
+                        _ = FinishAsrSessionAsync();
+                    }
                 }
             });
         };
@@ -82,7 +93,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                _audioOutput.AddSamples(bytes);
+                _asrBuffer.AddSamples(bytes);
                 var level = AudioLevelMeter.CalculatePercent(bytes);
                 Dispatcher.UIThread.Post(() => LevelBar.Value = level);
             }
@@ -98,16 +109,30 @@ public partial class MainWindow : Window
             {
                 using var document = JsonDocument.Parse(message);
                 if (document.RootElement.TryGetProperty("type", out var type)
-                    && type.GetString() == "vocotype-start")
+                    && IsStartControl(type.GetString()))
                 {
-                    VocoTypeController.PressF2();
-                    Dispatcher.UIThread.Post(() => StatusText.Text = "已按下 VocoType F2");
+                    if (!_isAsrReady)
+                    {
+                        AppLogger.Info($"ASR start rejected because worker is not ready. control={type.GetString()}");
+                        Dispatcher.UIThread.Post(() => StatusText.Text = "语音模型加载中，请稍后再说话");
+                        return;
+                    }
+
+                    AppLogger.Info($"ASR session started by control: {type.GetString()}");
+                    _asrBuffer.Start();
+                    Dispatcher.UIThread.Post(() => StatusText.Text = "正在录音，松开后识别");
                 }
                 else if (document.RootElement.TryGetProperty("type", out type)
-                    && type.GetString() == "vocotype-stop")
+                    && IsStopControl(type.GetString()))
                 {
-                    VocoTypeController.ReleaseF2();
-                    Dispatcher.UIThread.Post(() => StatusText.Text = "已松开 VocoType F2");
+                    if (!_asrBuffer.IsRecording)
+                    {
+                        AppLogger.Info($"ASR stop ignored because no recording session is active. control={type.GetString()}");
+                        return;
+                    }
+
+                    AppLogger.Info($"ASR session stopping by control: {type.GetString()}");
+                    _ = FinishAsrSessionAsync();
                 }
             }
             catch (Exception ex)
@@ -129,26 +154,20 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (DeviceBox.SelectedItem is not AudioOutputDevice device)
-        {
-            StatusText.Text = "请选择输出设备";
-            return;
-        }
-
         try
         {
-            _audioOutput.Start(device.DeviceNumber);
             await _server.StartAsync(port);
             StartButton.IsEnabled = false;
             StopButton.IsEnabled = true;
             PortBox.IsEnabled = false;
             DeviceBox.IsEnabled = false;
+            LoadModelButton.IsEnabled = false;
+            DeleteModelButton.IsEnabled = false;
             SetStatus($"● 正在监听 0.0.0.0:{port}", "#1769E0", "#EEF6FF");
             SyncListeningUi(isListening: true);
         }
         catch (Exception ex)
         {
-            _audioOutput.Stop();
             SetStatus($"● 启动失败: {ex.Message}", "#C13830", "#FFF1F0");
             SyncListeningUi(isListening: false);
         }
@@ -161,30 +180,124 @@ public partial class MainWindow : Window
 
     private void RefreshButton_Click(object? sender, RoutedEventArgs e)
     {
-        RefreshDevices();
+        RefreshModels();
     }
 
-    private void RefreshDevices()
+    private void RefreshModels()
     {
-        var devices = _audioOutput.GetDevices();
-        DeviceBox.ItemsSource = devices;
-        DeviceBox.SelectedItem = devices.FirstOrDefault(d => d.IsLikelyVirtualCable)
-                                 ?? devices.FirstOrDefault();
-        HintText.Text = devices.Any(d => d.IsLikelyVirtualCable)
-            ? "已发现疑似虚拟音频线设备。"
-            : "未发现 CABLE / Voicemeeter / Virtual 等常见虚拟音频线设备，请先安装或启用 VB-CABLE。";
+        var selectedId = GetSelectedModel()?.Id ?? _asrService.CurrentModel.Id;
+        DeviceBox.ItemsSource = null;
+        DeviceBox.ItemsSource = AsrModelCatalog.Models.ToArray();
+        DeviceBox.SelectedItem = AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
+            ?? AsrModelCatalog.DefaultModel;
+        HintText.Text = $"模型缓存目录: {AsrModelCatalog.CacheRoot}";
+        UpdateModelUi();
     }
 
     private void StopServer()
     {
         _server.Stop();
-        _audioOutput.Stop();
         SyncListeningUi(isListening: false);
         PortBox.IsEnabled = true;
         DeviceBox.IsEnabled = true;
+        UpdateModelUi();
         SetStatus("● 未监听", "#C13830", "#FFF1F0");
         ClientText.Text = "手机未连接";
         LevelBar.Value = 0;
+    }
+
+    private async void LoadModelButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var model = GetSelectedModel();
+        if (model is null)
+        {
+            StatusText.Text = "请选择语音模型";
+            return;
+        }
+
+        if (!model.IsSupported)
+        {
+            StatusText.Text = "这个模型入口已预留，当前版本暂不支持";
+            return;
+        }
+
+        try
+        {
+            SetModelButtonsEnabled(false);
+            await WarmUpAsrAsync(model);
+            RefreshModels();
+        }
+        finally
+        {
+            UpdateModelUi();
+        }
+    }
+
+    private async void DeleteModelButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var model = GetSelectedModel();
+        if (model is null)
+        {
+            StatusText.Text = "请选择语音模型";
+            return;
+        }
+
+        if (!model.IsDownloaded)
+        {
+            StatusText.Text = "当前模型尚未下载";
+            return;
+        }
+
+        try
+        {
+            SetModelButtonsEnabled(false);
+            _isAsrReady = false;
+            await _asrService.StopWorkerAsync();
+            var deleted = AsrModelCatalog.DeleteModelFiles(model);
+            AppLogger.Info($"ASR model cache deleted. model={model.Id}, directories={deleted}");
+            SetStatus($"● 已删除模型缓存: {model.DisplayName}", "#C13830", "#FFF1F0");
+            RefreshModels();
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("Delete ASR model cache failed", ex);
+            StatusText.Text = $"删除模型失败: {ex.Message}";
+        }
+        finally
+        {
+            UpdateModelUi();
+        }
+    }
+
+    private AsrModelOption? GetSelectedModel()
+    {
+        return DeviceBox.SelectedItem as AsrModelOption;
+    }
+
+    private void UpdateModelUi()
+    {
+        var model = GetSelectedModel();
+        if (model is null)
+        {
+            ModelDescriptionText.Text = string.Empty;
+            SetModelButtonsEnabled(false);
+            return;
+        }
+
+        var cacheStatus = model.IsSupported
+            ? model.IsDownloaded ? "已下载，可离线使用" : "未下载，加载时会自动下载"
+            : "当前版本暂不支持";
+        ModelDescriptionText.Text = $"{model.Description}  状态: {cacheStatus}";
+        SetModelButtonsEnabled(!StopButton.IsEnabled);
+        DeleteModelButton.IsEnabled = !StopButton.IsEnabled && model.IsSupported && model.IsDownloaded;
+    }
+
+    private void SetModelButtonsEnabled(bool enabled)
+    {
+        var model = GetSelectedModel();
+        var canUseSelectedModel = model is { IsSupported: true };
+        LoadModelButton.IsEnabled = enabled && canUseSelectedModel;
+        DeleteModelButton.IsEnabled = enabled && canUseSelectedModel && model!.IsDownloaded;
     }
 
     private void SetAppImages()
@@ -281,6 +394,133 @@ public partial class MainWindow : Window
         return new SolidColorBrush(Color.Parse(hex));
     }
 
+    private async Task FinishAsrSessionAsync()
+    {
+        if (_isRecognizing)
+        {
+            AppLogger.Info("ASR finish skipped because recognition is already running.");
+            return;
+        }
+
+        AppLogger.Info("ASR finish requested.");
+        var pcmBytes = _asrBuffer.Stop();
+        AppLogger.Info($"ASR session captured bytes={pcmBytes.Length}");
+        if (pcmBytes.Length < 1600)
+        {
+            AppLogger.Info("ASR session ignored because it is too short.");
+            Dispatcher.UIThread.Post(() => StatusText.Text = "录音太短，已忽略");
+            return;
+        }
+
+        _isRecognizing = true;
+        string? wavPath = null;
+        try
+        {
+            Dispatcher.UIThread.Post(() => StatusText.Text = "正在识别语音...");
+            wavPath = _asrBuffer.WriteWavFile(pcmBytes);
+            var text = await _asrService.RecognizeAsync(wavPath);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                AppLogger.Info("ASR returned empty text.");
+                Dispatcher.UIThread.Post(() => StatusText.Text = "没有识别到文本");
+                return;
+            }
+
+            await TextInputService.TypeTextAsync(text);
+            AppLogger.Info($"ASR text typed. length={text.Length}");
+            Dispatcher.UIThread.Post(() => StatusText.Text = $"已输入: {text}");
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("ASR recognition failed", ex);
+            Dispatcher.UIThread.Post(() => StatusText.Text = $"识别失败: {ex.Message}");
+        }
+        finally
+        {
+            _isRecognizing = false;
+            Dispatcher.UIThread.Post(() => LevelBar.Value = 0);
+            if (wavPath is not null)
+            {
+                AudioCacheService.TryDelete(wavPath);
+            }
+        }
+    }
+
+    private async Task WarmUpAsrAsync(AsrModelOption? model = null)
+    {
+        try
+        {
+            model ??= _asrService.CurrentModel;
+            AppLogger.Info($"ASR warm-up starting. model={model.Id}, downloaded={model.IsDownloaded}");
+            _isAsrReady = false;
+            Dispatcher.UIThread.Post(() =>
+            {
+                var verb = model.IsDownloaded ? "加载" : "下载并加载";
+                StatusText.Text = $"正在{verb}语音模型...";
+            });
+            await _asrService.ConfigureModelAsync(model);
+            await _asrService.WarmUpAsync();
+            _isAsrReady = true;
+            AppLogger.Info($"ASR warm-up completed. model={model.Id}");
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!StopButton.IsEnabled)
+                {
+                    SetStatus("● 未监听，语音模型已就绪", "#C13830", "#FFF1F0");
+                }
+                else
+                {
+                    StatusText.Text = "语音模型已就绪";
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _isAsrReady = false;
+            AppLogger.Error("ASR warm-up failed", ex);
+            Dispatcher.UIThread.Post(() => StatusText.Text = $"语音模型加载失败: {ex.Message}");
+        }
+    }
+
+    private async Task WarmUpAsrOnStartupAsync()
+    {
+        var model = _asrService.CurrentModel;
+        if (!model.IsDownloaded)
+        {
+            _isAsrReady = false;
+            AppLogger.Info($"ASR startup warm-up skipped because model is not downloaded. model={model.Id}");
+            StatusText.Text = "语音模型未下载，请先点击下载/加载模型";
+            return;
+        }
+
+        await WarmUpAsrAsync(model);
+    }
+
+    private static bool IsStartControl(string? type)
+    {
+        return type is "asr-start" or "vocotype-start";
+    }
+
+    private static bool IsStopControl(string? type)
+    {
+        return type is "asr-stop" or "vocotype-stop";
+    }
+
+    private void ClearAudioCacheButton_Click(object? sender, RoutedEventArgs e)
+    {
+        ClearAudioCache(showStatus: true);
+    }
+
+    private void ClearAudioCache(bool showStatus)
+    {
+        var count = AudioCacheService.Clear();
+        AppLogger.Info($"Audio cache cleared. files={count}, directory={AudioCacheService.CacheDirectory}");
+        if (showStatus)
+        {
+            StatusText.Text = count == 0 ? "语音缓存已清空" : $"已清理 {count} 个语音缓存文件";
+        }
+    }
+
     private void MinimizeButton_Click(object? sender, RoutedEventArgs e)
     {
         Hide();
@@ -358,6 +598,7 @@ public partial class MainWindow : Window
         StopServer();
         _server.Dispose();
         _audioOutput.Dispose();
+        _asrService.Dispose();
         _trayIcon.Dispose();
         base.OnClosed(e);
     }

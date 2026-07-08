@@ -55,7 +55,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _isReconnecting = false;
   bool _isRecording = false;
   bool _isStoppingRecording = false;
-  bool _isVocoTypeHeld = false;
+  bool _isAsrSessionActive = false;
   double _level = 0;
   String _status = '未连接';
 
@@ -151,8 +151,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
 
     try {
-      if (_sendControlMessage('vocotype-start')) {
-        _isVocoTypeHeld = true;
+      if (_sendControlMessage('asr-start')) {
+        _isAsrSessionActive = true;
       }
       await Future<void>.delayed(const Duration(milliseconds: 120));
       final stream = await _recorder.startStream(
@@ -231,7 +231,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _sendControlMessage(String type) {
     final socket = _socket;
     if (socket == null) {
-      _setStatus('未连接电脑，无法启动 VocoType');
+      _setStatus('未连接电脑，无法启动识别');
       return false;
     }
 
@@ -261,7 +261,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     _isStoppingRecording = true;
     unawaited(HapticFeedback.lightImpact());
 
-    if (!_isRecording && _audioSubscription == null && !_isVocoTypeHeld) {
+    if (!_isRecording && _audioSubscription == null && !_isAsrSessionActive) {
       _isStoppingRecording = false;
       return;
     }
@@ -275,10 +275,10 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         await _socket?.flush();
       }
 
-      if (_isVocoTypeHeld) {
-        _sendControlMessage('vocotype-stop');
+      if (_isAsrSessionActive) {
+        _sendControlMessage('asr-stop');
         await _socket?.flush();
-        _isVocoTypeHeld = false;
+        _isAsrSessionActive = false;
       }
 
       if (mounted) {

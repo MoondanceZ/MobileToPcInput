@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 
 namespace pc_receiver;
@@ -23,12 +24,15 @@ public static class AppLogger
 
     private static void Write(string level, string message)
     {
+        var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] MobileToPcInput {message}";
+        Debug.WriteLine(line);
+
         lock (Gate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
             File.AppendAllText(
                 LogPath,
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}");
+                $"{line}{Environment.NewLine}");
         }
     }
 }

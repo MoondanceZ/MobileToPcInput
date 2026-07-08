@@ -40,7 +40,7 @@
                      FontSize="22"
                      FontWeight="SemiBold"
                      Foreground="#1C2739" />
-          <TextBlock Text="手机麦克风接收器 · TCP 音频桥"
+          <TextBlock Text="手机麦克风接收器 · 本地语音识别"
                      FontSize="12"
                      Foreground="#718096" />
         </StackPanel>
@@ -123,7 +123,7 @@
               </StackPanel>
             </Border>
 
-            <Grid ColumnDefinitions="108,*" RowDefinitions="Auto,Auto" RowSpacing="12">
+            <Grid ColumnDefinitions="108,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="12">
               <TextBlock Grid.Row="0"
                          Grid.Column="0"
                          VerticalAlignment="Center"
@@ -144,7 +144,7 @@
               <TextBlock Grid.Row="1"
                          Grid.Column="0"
                          VerticalAlignment="Center"
-                         Text="输出设备"
+                         Text="语音模型"
                          Foreground="#536174"
                          FontWeight="SemiBold" />
               <ComboBox x:Name="DeviceBox"
@@ -154,6 +154,60 @@
                         CornerRadius="9"
                         BorderBrush="#D6E0EC"
                         Background="White" />
+
+              <TextBlock x:Name="ModelDescriptionText"
+                         Grid.Row="2"
+                         Grid.Column="1"
+                         FontSize="12"
+                         Foreground="#718096"
+                         TextWrapping="Wrap" />
+            </Grid>
+
+            <Grid ColumnDefinitions="Auto,12,Auto,*,Auto">
+              <Button x:Name="LoadModelButton"
+                      Grid.Column="0"
+                      MinHeight="38"
+                      Padding="14,8"
+                      Click="LoadModelButton_Click"
+                      Content="下载/加载模型"
+                      FontSize="14"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Background="#1769E0"
+                      Foreground="White"
+                      BorderBrush="#1769E0"
+                      BorderThickness="1"
+                      CornerRadius="10"
+                      FontWeight="SemiBold" />
+              <Button x:Name="DeleteModelButton"
+                      Grid.Column="2"
+                      MinHeight="38"
+                      Padding="14,8"
+                      Click="DeleteModelButton_Click"
+                      Content="删除模型"
+                      FontSize="14"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Background="#FFF1F0"
+                      Foreground="#C13830"
+                      BorderBrush="#FFD5D2"
+                      BorderThickness="1"
+                      CornerRadius="10"
+                      FontWeight="SemiBold" />
+              <Button Grid.Column="4"
+                      MinHeight="38"
+                      Padding="14,8"
+                      Click="RefreshButton_Click"
+                      Content="刷新模型"
+                      FontSize="14"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Background="#F8FAFC"
+                      Foreground="#1F334D"
+                      BorderBrush="#D6E0EC"
+                      BorderThickness="1"
+                      CornerRadius="10"
+                      FontWeight="SemiBold" />
             </Grid>
 
             <Grid ColumnDefinitions="Auto,12,Auto,*,Auto">
@@ -179,20 +233,6 @@
                       IsEnabled="False"
                       Click="StopButton_Click"
                       Content="停止监听"
-                      FontSize="14"
-                      HorizontalContentAlignment="Center"
-                      VerticalContentAlignment="Center"
-                      Background="#F8FAFC"
-                      Foreground="#1F334D"
-                      BorderBrush="#D6E0EC"
-                      BorderThickness="1"
-                      CornerRadius="10"
-                      FontWeight="SemiBold" />
-              <Button Grid.Column="4"
-                      MinHeight="38"
-                      Padding="14,8"
-                      Click="RefreshButton_Click"
-                      Content="刷新输出设备"
                       FontSize="14"
                       HorizontalContentAlignment="Center"
                       VerticalContentAlignment="Center"
@@ -295,6 +335,19 @@
                        FontSize="12"
                        Foreground="#718096"
                        TextWrapping="Wrap" />
+            <Button MinHeight="38"
+                    Padding="14,8"
+                    Click="ClearAudioCacheButton_Click"
+                    Content="清理语音缓存"
+                    FontSize="14"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center"
+                    Background="#F8FAFC"
+                    Foreground="#1F334D"
+                    BorderBrush="#D6E0EC"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    FontWeight="SemiBold" />
           </StackPanel>
         </Border>
 
@@ -307,7 +360,7 @@
                 BorderBrush="#E1E8F0"
                 BorderThickness="1"
                 Padding="14,10">
-          <TextBlock Text="使用流程：输出设备选择 CABLE Input，VocoType 的录音输入选择 CABLE Output；手机按住说话时会保持 F2，松开后触发转文本。"
+          <TextBlock Text="使用流程：电脑端开始监听；手机连接后按住说话，松开后由本机 Paraformer 识别，并把文本直接输入到当前输入框。"
                      FontSize="13"
                      Foreground="#536174"
                      TextWrapping="Wrap" />

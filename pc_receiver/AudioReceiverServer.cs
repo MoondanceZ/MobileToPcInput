@@ -74,6 +74,9 @@ public sealed class AudioReceiverServer : IDisposable
     private async Task HandleClientAsync(TcpClient client, CancellationToken token)
     {
         using var _ = client;
+        var audioFrames = 0;
+        long audioBytes = 0;
+        var controlFrames = 0;
         try
         {
             using var stream = client.GetStream();
@@ -104,11 +107,20 @@ public sealed class AudioReceiverServer : IDisposable
                 switch (type)
                 {
                     case AudioFrame:
+                        audioFrames++;
+                        audioBytes += payload.Length;
+                        if (audioFrames == 1 || audioFrames % 20 == 0)
+                        {
+                            AppLogger.Info(
+                                $"TCP audio frame received. frames={audioFrames}, totalBytes={audioBytes}, lastBytes={payload.Length}");
+                        }
+
                         AudioFrameReceived?.Invoke(payload);
                         break;
                     case ControlFrame:
+                        controlFrames++;
                         var message = Encoding.UTF8.GetString(payload);
-                        AppLogger.Info($"Control message received: {message}");
+                        AppLogger.Info($"TCP control frame received. controls={controlFrames}, message={message}");
                         ControlMessageReceived?.Invoke(message);
                         break;
                     default:
@@ -134,7 +146,8 @@ public sealed class AudioReceiverServer : IDisposable
         }
         finally
         {
-            AppLogger.Info("TCP client disconnected");
+            AppLogger.Info(
+                $"TCP client disconnected. controls={controlFrames}, audioFrames={audioFrames}, audioBytes={audioBytes}");
             ClientStateChanged?.Invoke(false);
         }
     }
