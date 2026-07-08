@@ -1,0 +1,87 @@
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+    Name="MobileToPcInput"
+    Manufacturer="MobileToPcInput"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="37c1f55e-6755-4d37-9b08-fca716ef55cc"
+    Scope="perMachine"
+    Codepage="65001">
+
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 MobileToPcInput。" />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="AppIcon.ico" SourceFile="$(var.ProjectDir)\Assets\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch
+        Id="PreviousInstallDirSearch"
+        Root="HKLM"
+        Key="Software\MobileToPcInput"
+        Name="InstallDir"
+        Type="raw" />
+    </Property>
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.ProjectDir)\Installer\License.rtf" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MobileToPcInput">
+        <Component Id="MobileToPcInputExe" Guid="*">
+          <File
+            Id="MobileToPcInputExeFile"
+            Source="$(var.PublishDir)\MobileToPcInput.exe"
+            KeyPath="yes" />
+          <Shortcut
+            Id="StartMenuShortcut"
+            Directory="ApplicationProgramsFolder"
+            Name="MobileToPcInput"
+            Description="MobileToPcInput 手机麦克风接收器"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="AppIcon.ico"
+            Advertise="true" />
+          <RegistryValue
+            Root="HKLM"
+            Key="Software\MobileToPcInput"
+            Name="InstallDir"
+            Type="string"
+            Value="[INSTALLFOLDER]" />
+        </Component>
+
+        <Component Id="AvaloniaAngleNative" Guid="*">
+          <File Source="$(var.PublishDir)\av_libglesv2.dll" KeyPath="yes" />
+        </Component>
+
+        <Component Id="HarfBuzzNative" Guid="*">
+          <File Source="$(var.PublishDir)\libHarfBuzzSharp.dll" KeyPath="yes" />
+        </Component>
+
+        <Component Id="SkiaNative" Guid="*">
+          <File Source="$(var.PublishDir)\libSkiaSharp.dll" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="MobileToPcInput">
+        <Component Id="ApplicationProgramsFolderComponent" Guid="87f2d9b0-6d1f-42a7-a9b0-1ac071393db4">
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue
+            Root="HKCU"
+            Key="Software\MobileToPcInput"
+            Name="StartMenuFolder"
+            Type="integer"
+            Value="1"
+            KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="MobileToPcInput" Level="1">
+      <ComponentRef Id="MobileToPcInputExe" />
+      <ComponentRef Id="AvaloniaAngleNative" />
+      <ComponentRef Id="HarfBuzzNative" />
+      <ComponentRef Id="SkiaNative" />
+      <ComponentRef Id="ApplicationProgramsFolderComponent" />
+    </Feature>
+  </Package>
+</Wix>

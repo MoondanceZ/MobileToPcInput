@@ -1,0 +1,318 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="pc_receiver.MainWindow"
+        Width="860"
+        Height="620"
+        MinWidth="860"
+        MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="Transparent"
+        Title="MobileToPcInput">
+  <Border x:Name="Surface"
+          CornerRadius="18"
+          ClipToBounds="True"
+          BorderBrush="#D8E1EC"
+          BorderThickness="1"
+          BoxShadow="0 18 34 0 #2D17263B">
+    <Border.Background>
+      <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+        <GradientStop Color="#F8FBFF" Offset="0" />
+        <GradientStop Color="#E9F0F9" Offset="1" />
+      </LinearGradientBrush>
+    </Border.Background>
+
+    <Grid RowDefinitions="82,*">
+      <Grid x:Name="TitleBar"
+            Grid.Row="0"
+            ColumnDefinitions="52,*,168"
+            Margin="24,18,18,12"
+            Background="Transparent">
+        <Image x:Name="LogoImage"
+               Width="42"
+               Height="42"
+               Stretch="Uniform"
+               VerticalAlignment="Center" />
+
+        <StackPanel Grid.Column="1"
+                    Spacing="1"
+                    VerticalAlignment="Center">
+          <TextBlock Text="MobileToPcInput"
+                     FontSize="22"
+                     FontWeight="SemiBold"
+                     Foreground="#1C2739" />
+          <TextBlock Text="手机麦克风接收器 · TCP 音频桥"
+                     FontSize="12"
+                     Foreground="#718096" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8">
+          <Button Width="42"
+                  Height="34"
+                  MinHeight="34"
+                  Padding="0"
+                  Click="MinimizeButton_Click"
+                  Content="─"
+                  FontSize="18"
+                  FontWeight="Normal"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center"
+                  Background="#F8FAFC"
+                  Foreground="#1F334D"
+                  BorderBrush="#D6E0EC"
+                  BorderThickness="1"
+                  CornerRadius="10" />
+          <Button Width="42"
+                  Height="34"
+                  MinHeight="34"
+                  Padding="0"
+                  Click="CloseButton_Click"
+                  Content="×"
+                  FontSize="18"
+                  FontWeight="Normal"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center"
+                  Background="#F8FAFC"
+                  Foreground="#1F334D"
+                  BorderBrush="#D6E0EC"
+                  BorderThickness="1"
+                  CornerRadius="10" />
+        </StackPanel>
+      </Grid>
+
+      <Grid Grid.Row="1"
+            Margin="24,0,24,24"
+            ColumnDefinitions="1.04*,18,0.96*"
+            RowDefinitions="Auto,*,Auto">
+        <Border Grid.Column="0"
+                Grid.RowSpan="2"
+                Padding="18"
+                CornerRadius="18"
+                Background="White"
+                BorderBrush="#DDE6F1"
+                BorderThickness="1"
+                BoxShadow="0 8 18 0 #1217263B">
+          <StackPanel Spacing="14">
+            <StackPanel Spacing="4">
+              <TextBlock Text="电脑连接信息"
+                         FontSize="18"
+                         FontWeight="SemiBold"
+                         Foreground="#1C2739" />
+              <TextBlock Text="手机端填入这里显示的 IP 和端口"
+                         FontSize="13"
+                         Foreground="#718096" />
+            </StackPanel>
+
+            <Border CornerRadius="14"
+                    Padding="14,12"
+                    Background="#F4F7FB"
+                    BorderBrush="#DDE6F1"
+                    BorderThickness="1">
+              <StackPanel Spacing="6">
+                <TextBlock Text="局域网地址"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="#536174" />
+                <TextBlock x:Name="IpText"
+                           FontSize="19"
+                           FontWeight="SemiBold"
+                           Foreground="#1769E0"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Grid ColumnDefinitions="108,*" RowDefinitions="Auto,Auto" RowSpacing="12">
+              <TextBlock Grid.Row="0"
+                         Grid.Column="0"
+                         VerticalAlignment="Center"
+                         Text="监听端口"
+                         Foreground="#536174"
+                         FontWeight="SemiBold" />
+              <TextBox x:Name="PortBox"
+                       Grid.Row="0"
+                      Grid.Column="1"
+                      Height="38"
+                      Text="8765"
+                       PlaceholderText="8765"
+                       CornerRadius="9"
+                       BorderBrush="#D6E0EC"
+                       Background="White"
+                       Padding="10,6" />
+
+              <TextBlock Grid.Row="1"
+                         Grid.Column="0"
+                         VerticalAlignment="Center"
+                         Text="输出设备"
+                         Foreground="#536174"
+                         FontWeight="SemiBold" />
+              <ComboBox x:Name="DeviceBox"
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        MinHeight="38"
+                        CornerRadius="9"
+                        BorderBrush="#D6E0EC"
+                        Background="White" />
+            </Grid>
+
+            <Grid ColumnDefinitions="Auto,12,Auto,*,Auto">
+              <Button x:Name="StartButton"
+                      Grid.Column="0"
+                      MinHeight="38"
+                      Padding="14,8"
+                      Click="StartButton_Click"
+                      Content="开始监听"
+                      FontSize="14"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Background="#1769E0"
+                      Foreground="White"
+                      BorderBrush="#1769E0"
+                      BorderThickness="1"
+                      CornerRadius="10"
+                      FontWeight="SemiBold" />
+              <Button x:Name="StopButton"
+                      Grid.Column="2"
+                      MinHeight="38"
+                      Padding="14,8"
+                      IsEnabled="False"
+                      Click="StopButton_Click"
+                      Content="停止监听"
+                      FontSize="14"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Background="#F8FAFC"
+                      Foreground="#1F334D"
+                      BorderBrush="#D6E0EC"
+                      BorderThickness="1"
+                      CornerRadius="10"
+                      FontWeight="SemiBold" />
+              <Button Grid.Column="4"
+                      MinHeight="38"
+                      Padding="14,8"
+                      Click="RefreshButton_Click"
+                      Content="刷新输出设备"
+                      FontSize="14"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      Background="#F8FAFC"
+                      Foreground="#1F334D"
+                      BorderBrush="#D6E0EC"
+                      BorderThickness="1"
+                      CornerRadius="10"
+                      FontWeight="SemiBold" />
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Column="2"
+                    Grid.Row="0"
+                    Spacing="12">
+          <Border x:Name="StatusPill"
+                  CornerRadius="14"
+                  Padding="16,10"
+                  Background="#FFF1F0">
+            <TextBlock x:Name="StatusText"
+                       FontSize="15"
+                       FontWeight="SemiBold"
+                       Text="● 未监听"
+                       Foreground="#C13830" />
+          </Border>
+
+          <Border Padding="18"
+                  CornerRadius="18"
+                  Background="White"
+                  BorderBrush="#DDE6F1"
+                  BorderThickness="1"
+                  BoxShadow="0 8 18 0 #1217263B">
+            <StackPanel Spacing="14">
+              <StackPanel Spacing="4">
+                <TextBlock Text="实时状态"
+                           FontSize="18"
+                           FontWeight="SemiBold"
+                           Foreground="#1C2739" />
+                <TextBlock x:Name="ClientText"
+                           Text="手机未连接"
+                           FontSize="13"
+                           Foreground="#718096" />
+              </StackPanel>
+
+              <Grid ColumnDefinitions="72,*">
+                <TextBlock Text="音量"
+                           FontSize="12"
+                           Foreground="#718096"
+                           VerticalAlignment="Center" />
+                <ProgressBar x:Name="LevelBar"
+                             Grid.Column="1"
+                             Height="12"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="0"
+                             CornerRadius="8"
+                             Foreground="#1769E0"
+                             Background="#DDE6F1" />
+              </Grid>
+
+              <Border CornerRadius="12"
+                      Padding="12"
+                      Background="#F7FAFE"
+                      BorderBrush="#E1E8F0"
+                      BorderThickness="1">
+                <TextBlock x:Name="HintText"
+                           FontSize="13"
+                           Foreground="#8A4B00"
+                           TextWrapping="Wrap" />
+              </Border>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <Border Grid.Column="2"
+                Grid.Row="1"
+                Margin="0,12,0,0"
+                Padding="18"
+                CornerRadius="18"
+                Background="#FAFCFF"
+                BorderBrush="#D8E1EC"
+                BorderThickness="1">
+          <StackPanel Spacing="12">
+            <TextBlock Text="系统"
+                       FontSize="13"
+                       FontWeight="SemiBold"
+                       Foreground="#536174" />
+            <Border CornerRadius="10"
+                    Background="White"
+                    BorderBrush="#DDE6F1"
+                    BorderThickness="1"
+                    Padding="10,8">
+              <CheckBox x:Name="StartupBox"
+                        VerticalAlignment="Center"
+                        Foreground="#1F334D"
+                        Content="开机自动启动 MobileToPcInput" />
+            </Border>
+            <TextBlock Text="关闭窗口会隐藏到托盘，托盘菜单可以显示窗口或退出程序。"
+                       FontSize="12"
+                       Foreground="#718096"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Column="0"
+                Grid.ColumnSpan="3"
+                Grid.Row="2"
+                Margin="0,16,0,0"
+                CornerRadius="12"
+                Background="#F7FAFE"
+                BorderBrush="#E1E8F0"
+                BorderThickness="1"
+                Padding="14,10">
+          <TextBlock Text="使用流程：输出设备选择 CABLE Input，VocoType 的录音输入选择 CABLE Output；手机按住说话时会保持 F2，松开后触发转文本。"
+                     FontSize="13"
+                     Foreground="#536174"
+                     TextWrapping="Wrap" />
+        </Border>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>
