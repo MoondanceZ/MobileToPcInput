@@ -29,6 +29,12 @@ public partial class MainWindow : Window
     private bool _allowClose;
     private bool _isRecognizing;
     private bool _isAsrReady;
+    private bool _isModelOperationRunning;
+    private string _modelOperationMessage = "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。";
+    private double _modelOperationProgress;
+    private bool _modelOperationIsIndeterminate;
+
+    private event Action? ModelOperationChanged;
 
     public MainWindow()
     {
@@ -50,6 +56,8 @@ public partial class MainWindow : Window
         StartupBox.IsChecked = _startupService.IsEnabled();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
         DeviceBox.SelectionChanged += (_, _) => UpdateModelUi();
+        PortBox.TextChanged += (_, _) => UpdateConnectQrCode();
+        _asrService.WorkerStatusChanged += OnAsrWorkerStatus;
 
         _trayStartItem = new NativeMenuItem("开始监听");
         _trayStopItem = new NativeMenuItem("停止监听") { IsEnabled = false };
@@ -60,8 +68,9 @@ public partial class MainWindow : Window
         };
         _trayIcon = CreateTrayIcon();
 
-        IpText.Text = NetworkAddressHelper.GetDisplayText();
+        IpText.Text = NetworkAddressHelper.GetPreferredLocalIp();
         RefreshModels();
+        UpdateConnectQrCode();
         ClearAudioCache(showStatus: false);
         Loaded += (_, _) => _ = WarmUpAsrOnStartupAsync();
 
@@ -148,6 +157,11 @@ public partial class MainWindow : Window
 
     private async void StartButton_Click(object? sender, RoutedEventArgs e)
     {
+        await StartListeningAsync();
+    }
+
+    private async Task StartListeningAsync()
+    {
         if (!int.TryParse(PortBox.Text, out var port) || port <= 0 || port > 65535)
         {
             StatusText.Text = "端口不正确";
@@ -161,8 +175,7 @@ public partial class MainWindow : Window
             StopButton.IsEnabled = true;
             PortBox.IsEnabled = false;
             DeviceBox.IsEnabled = false;
-            LoadModelButton.IsEnabled = false;
-            DeleteModelButton.IsEnabled = false;
+            ManageModelButton.IsEnabled = true;
             SetStatus($"● 正在监听 0.0.0.0:{port}", "#1769E0", "#EEF6FF");
             SyncListeningUi(isListening: true);
         }
@@ -190,7 +203,7 @@ public partial class MainWindow : Window
         DeviceBox.ItemsSource = AsrModelCatalog.Models.ToArray();
         DeviceBox.SelectedItem = AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
             ?? AsrModelCatalog.DefaultModel;
-        HintText.Text = $"模型缓存目录: {AsrModelCatalog.CacheRoot}";
+        HintText.Text = "当前使用本机离线语音识别；模型可在“模型管理”中维护。";
         UpdateModelUi();
     }
 
@@ -200,73 +213,180 @@ public partial class MainWindow : Window
         SyncListeningUi(isListening: false);
         PortBox.IsEnabled = true;
         DeviceBox.IsEnabled = true;
+        ManageModelButton.IsEnabled = true;
         UpdateModelUi();
         SetStatus("● 未监听", "#C13830", "#FFF1F0");
         ClientText.Text = "手机未连接";
         LevelBar.Value = 0;
     }
 
-    private async void LoadModelButton_Click(object? sender, RoutedEventArgs e)
+    private async void ManageModelButton_Click(object? sender, RoutedEventArgs e)
     {
-        var model = GetSelectedModel();
-        if (model is null)
-        {
-            StatusText.Text = "请选择语音模型";
-            return;
-        }
-
-        if (!model.IsSupported)
-        {
-            StatusText.Text = "这个模型入口已预留，当前版本暂不支持";
-            return;
-        }
-
-        try
-        {
-            SetModelButtonsEnabled(false);
-            await WarmUpAsrAsync(model);
-            RefreshModels();
-        }
-        finally
-        {
-            UpdateModelUi();
-        }
+        var window = new ModelManagerWindow(
+            LoadModelFromManagerAsync,
+            DeleteModelFromManagerAsync,
+            RefreshModels,
+            () => _isAsrReady ? _asrService.CurrentModel.Id : null,
+            GetModelOperationSnapshot,
+            handler => ModelOperationChanged += handler,
+            handler => ModelOperationChanged -= handler);
+        await window.ShowDialog(this);
+        RefreshModels();
     }
 
-    private async void DeleteModelButton_Click(object? sender, RoutedEventArgs e)
+    private async Task LoadModelFromManagerAsync(AsrModelOption model)
     {
-        var model = GetSelectedModel();
-        if (model is null)
+        if (!model.IsSupported)
         {
-            StatusText.Text = "请选择语音模型";
-            return;
+            throw new NotSupportedException("这个模型入口已预留，当前版本暂不支持");
         }
 
+        if (_asrBuffer.IsRecording || _isRecognizing)
+        {
+            throw new InvalidOperationException("正在录音或识别中，完成后再切换模型");
+        }
+
+        DeviceBox.SelectedItem = model;
+        var wasDownloaded = model.IsDownloaded;
+        SetModelOperation(
+            isRunning: true,
+            message: wasDownloaded ? $"正在加载 {model.DisplayName}..." : $"正在下载 {model.DisplayName}...",
+            progress: wasDownloaded ? 35 : 8,
+            isIndeterminate: false);
+        try
+        {
+            await WarmUpAsrAsync(model);
+            SetModelOperation(
+                isRunning: false,
+                message: _isAsrReady && _asrService.CurrentModel.Id == model.Id
+                    ? $"已加载 {model.DisplayName}"
+                    : $"加载失败: {model.DisplayName}",
+                progress: _isAsrReady && _asrService.CurrentModel.Id == model.Id ? 100 : 0,
+                isIndeterminate: false);
+        }
+        catch (Exception ex)
+        {
+            SetModelOperation(
+                isRunning: false,
+                message: $"加载失败: {ex.Message}",
+                progress: 0,
+                isIndeterminate: false);
+            throw;
+        }
+
+        RefreshModels();
+    }
+
+    private async Task DeleteModelFromManagerAsync(AsrModelOption model)
+    {
         if (!model.IsDownloaded)
         {
             StatusText.Text = "当前模型尚未下载";
             return;
         }
 
+        if (_asrBuffer.IsRecording || _isRecognizing)
+        {
+            throw new InvalidOperationException("正在录音或识别中，完成后再删除模型");
+        }
+
+        if (_isAsrReady && _asrService.CurrentModel.Id == model.Id)
+        {
+            throw new InvalidOperationException("当前已加载的模型不能删除，请先切换到其他模型");
+        }
+
+        SetModelOperation(
+            isRunning: true,
+            message: $"正在删除 {model.DisplayName}...",
+            progress: 30,
+            isIndeterminate: false);
         try
         {
-            SetModelButtonsEnabled(false);
-            _isAsrReady = false;
-            await _asrService.StopWorkerAsync();
             var deleted = AsrModelCatalog.DeleteModelFiles(model);
             AppLogger.Info($"ASR model cache deleted. model={model.Id}, directories={deleted}");
             SetStatus($"● 已删除模型缓存: {model.DisplayName}", "#C13830", "#FFF1F0");
-            RefreshModels();
+            SetModelOperation(
+                isRunning: false,
+                message: $"已删除 {model.DisplayName}",
+                progress: 100,
+                isIndeterminate: false);
         }
         catch (Exception ex)
         {
-            AppLogger.Error("Delete ASR model cache failed", ex);
-            StatusText.Text = $"删除模型失败: {ex.Message}";
+            SetModelOperation(
+                isRunning: false,
+                message: $"删除失败: {ex.Message}",
+                progress: 0,
+                isIndeterminate: false);
+            throw;
         }
-        finally
+
+        RefreshModels();
+    }
+
+    private ModelOperationSnapshot GetModelOperationSnapshot()
+    {
+        return new ModelOperationSnapshot(
+            _isModelOperationRunning,
+            _modelOperationMessage,
+            _modelOperationProgress,
+            _modelOperationIsIndeterminate);
+    }
+
+    private void SetModelOperation(bool isRunning, string message, double progress, bool isIndeterminate)
+    {
+        _isModelOperationRunning = isRunning;
+        _modelOperationMessage = message;
+        _modelOperationProgress = Math.Clamp(progress, 0, 100);
+        _modelOperationIsIndeterminate = isIndeterminate;
+        Dispatcher.UIThread.Post(() => ModelOperationChanged?.Invoke());
+    }
+
+    private void OnAsrWorkerStatus(string message)
+    {
+        if (!_isModelOperationRunning)
         {
-            UpdateModelUi();
+            return;
         }
+
+        var progress = _modelOperationProgress;
+        var text = _modelOperationMessage;
+        if (message.Contains("model cache missing", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 15);
+            text = "正在下载模型文件...";
+        }
+        else if (message.Contains("using cached model", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 35);
+            text = "正在检查本地模型缓存...";
+        }
+        else if (message.Contains("loading ASR ONNX model", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 62);
+            text = "正在加载语音识别模型...";
+        }
+        else if (message.Contains("loading punctuation ONNX model", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 76);
+            text = "正在加载标点模型...";
+        }
+        else if (message.Contains("ONNX models ready", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 90);
+            text = "模型已加载，正在预热...";
+        }
+        else if (message.Contains("warm-up done", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 98);
+            text = "模型预热完成...";
+        }
+        else
+        {
+            return;
+        }
+
+        SetModelOperation(isRunning: true, message: text, progress, isIndeterminate: false);
     }
 
     private AsrModelOption? GetSelectedModel()
@@ -279,25 +399,8 @@ public partial class MainWindow : Window
         var model = GetSelectedModel();
         if (model is null)
         {
-            ModelDescriptionText.Text = string.Empty;
-            SetModelButtonsEnabled(false);
             return;
         }
-
-        var cacheStatus = model.IsSupported
-            ? model.IsDownloaded ? "已下载，可离线使用" : "未下载，加载时会自动下载"
-            : "当前版本暂不支持";
-        ModelDescriptionText.Text = $"{model.Description}  状态: {cacheStatus}";
-        SetModelButtonsEnabled(!StopButton.IsEnabled);
-        DeleteModelButton.IsEnabled = !StopButton.IsEnabled && model.IsSupported && model.IsDownloaded;
-    }
-
-    private void SetModelButtonsEnabled(bool enabled)
-    {
-        var model = GetSelectedModel();
-        var canUseSelectedModel = model is { IsSupported: true };
-        LoadModelButton.IsEnabled = enabled && canUseSelectedModel;
-        DeleteModelButton.IsEnabled = enabled && canUseSelectedModel && model!.IsDownloaded;
     }
 
     private void SetAppImages()
@@ -392,6 +495,18 @@ public partial class MainWindow : Window
     private static IBrush Brush(string hex)
     {
         return new SolidColorBrush(Color.Parse(hex));
+    }
+
+    private void UpdateConnectQrCode()
+    {
+        if (!int.TryParse(PortBox.Text, out var port) || port <= 0 || port > 65535)
+        {
+            QrImage.Source = null;
+            return;
+        }
+
+        var uri = QrCodeService.BuildConnectUri(NetworkAddressHelper.GetPreferredLocalIp(), port);
+        QrImage.Source = QrCodeService.CreateBitmap(uri);
     }
 
     private async Task FinishAsrSessionAsync()
@@ -489,11 +604,15 @@ public partial class MainWindow : Window
         {
             _isAsrReady = false;
             AppLogger.Info($"ASR startup warm-up skipped because model is not downloaded. model={model.Id}");
-            StatusText.Text = "语音模型未下载，请先点击下载/加载模型";
+            StatusText.Text = "语音模型未下载，请先打开模型管理";
             return;
         }
 
         await WarmUpAsrAsync(model);
+        if (_isAsrReady && !StopButton.IsEnabled)
+        {
+            await StartListeningAsync();
+        }
     }
 
     private static bool IsStartControl(string? type)

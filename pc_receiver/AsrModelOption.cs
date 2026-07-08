@@ -20,10 +20,7 @@ public sealed class AsrModelOption
 
     public override string ToString()
     {
-        var status = IsSupported
-            ? IsDownloaded ? "已下载" : "未下载"
-            : "待支持";
-        return $"{DisplayName} · {status}";
+        return DisplayName;
     }
 }
 
@@ -45,19 +42,17 @@ public static class AsrModelCatalog
         {
             Id = "paraformer-large-en",
             DisplayName = "paraformer-large-en（专用英文模型）",
-            Description = "英文模型入口已预留，当前版本暂不加载。",
+            Description = "英文 16k 离线识别模型。",
             AsrModel = "iic/speech_paraformer-large_asr_nat-en-16k-common-vocab10020-onnx",
-            PunctuationModel = DefaultPunctuationModel,
-            IsSupported = false
+            PunctuationModel = DefaultPunctuationModel
         },
         new AsrModelOption
         {
             Id = "paraformer-large-zh-cn-contextual",
             DisplayName = "paraformer-large-zh-cn-contextual（中文热词增强模型）",
-            Description = "热词增强模型入口已预留，当前版本暂不加载。",
+            Description = "中文热词增强 16k 离线识别模型。",
             AsrModel = "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx",
-            PunctuationModel = DefaultPunctuationModel,
-            IsSupported = false
+            PunctuationModel = DefaultPunctuationModel
         }
     ];
 
@@ -87,11 +82,16 @@ public static class AsrModelCatalog
     public static int DeleteModelFiles(AsrModelOption model)
     {
         var deleted = 0;
-        foreach (var directory in new[]
-                 {
-                     GetModelCacheDirectory(model.AsrModel),
-                     GetModelCacheDirectory(model.PunctuationModel)
-                 }.Distinct(StringComparer.OrdinalIgnoreCase))
+        var directories = new List<string>
+        {
+            GetModelCacheDirectory(model.AsrModel)
+        };
+        if (!IsPunctuationModelSharedByOtherDownloadedModel(model))
+        {
+            directories.Add(GetModelCacheDirectory(model.PunctuationModel));
+        }
+
+        foreach (var directory in directories.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!Directory.Exists(directory))
             {
@@ -103,5 +103,12 @@ public static class AsrModelCatalog
         }
 
         return deleted;
+    }
+
+    private static bool IsPunctuationModelSharedByOtherDownloadedModel(AsrModelOption model)
+    {
+        return Models.Any(other => other.Id != model.Id
+            && string.Equals(other.PunctuationModel, model.PunctuationModel, StringComparison.OrdinalIgnoreCase)
+            && IsModelDownloaded(other.AsrModel));
     }
 }

@@ -1,0 +1,77 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="pc_receiver.ModelManagerWindow"
+        Width="720"
+        Height="500"
+        WindowStartupLocation="CenterOwner"
+        WindowDecorations="None"
+        Background="Transparent"
+        Title="模型管理">
+  <Border x:Name="Surface"
+          CornerRadius="18"
+          ClipToBounds="True"
+          Background="#F7FAFE"
+          BorderBrush="#D8E1EC"
+          BorderThickness="1"
+          BoxShadow="0 18 34 0 #2D17263B">
+    <Grid RowDefinitions="72,*">
+      <Grid x:Name="TitleBar"
+            Grid.Row="0"
+            ColumnDefinitions="*,Auto"
+            Margin="24,18,18,8"
+            Background="Transparent">
+        <StackPanel Spacing="2"
+                    VerticalAlignment="Center">
+          <TextBlock Text="语音识别模型"
+                     FontSize="22"
+                     FontWeight="SemiBold"
+                     Foreground="#1C2739" />
+          <TextBlock Text="选择本地模型，未下载的模型可在这里下载"
+                     FontSize="12"
+                     Foreground="#718096" />
+        </StackPanel>
+
+        <Button Grid.Column="1"
+                Width="42"
+                Height="34"
+                MinHeight="34"
+                Padding="0"
+                Click="CloseButton_Click"
+                Content="×"
+                FontSize="18"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Background="#F8FAFC"
+                Foreground="#1F334D"
+                BorderBrush="#D6E0EC"
+                BorderThickness="1"
+                CornerRadius="10" />
+      </Grid>
+
+      <Grid Grid.Row="1"
+            RowDefinitions="*,Auto,Auto"
+            Margin="24,4,24,30">
+        <StackPanel x:Name="ModelsPanel"
+                    Spacing="12" />
+
+        <TextBlock x:Name="StatusText"
+                   Grid.Row="1"
+                   Margin="0,24,0,0"
+                   FontSize="12"
+                   Foreground="#718096"
+                   TextWrapping="Wrap" />
+        <ProgressBar x:Name="DownloadProgress"
+                     Grid.Row="2"
+                     Margin="0,10,0,0"
+                     Height="8"
+                     Minimum="0"
+                     Maximum="100"
+                     IsIndeterminate="True"
+                     IsVisible="False"
+                     CornerRadius="999"
+                     Foreground="#1769E0"
+                     Background="#DDE6F1" />
+      </Grid>
+    </Grid>
+  </Border>
+</Window>

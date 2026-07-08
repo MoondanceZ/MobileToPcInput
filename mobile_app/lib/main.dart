@@ -41,6 +41,7 @@ class MicrophoneBridgePage extends StatefulWidget {
 class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   static const _hostKey = 'receiver_host';
   static const _portKey = 'receiver_port';
+  static const _deepLinkChannel = MethodChannel('mobile_to_pc_input/deep_link');
 
   final _hostController = TextEditingController();
   final _portController = TextEditingController(text: '8765');
@@ -62,6 +63,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   @override
   void initState() {
     super.initState();
+    _deepLinkChannel.setMethodCallHandler(_handleDeepLinkCall);
     _loadSettings();
   }
 
@@ -69,6 +71,43 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     final prefs = await SharedPreferences.getInstance();
     _hostController.text = prefs.getString(_hostKey) ?? '';
     _portController.text = prefs.getString(_portKey) ?? '8765';
+    try {
+      final initialLink = await _deepLinkChannel.invokeMethod<String?>(
+        'getInitialLink',
+      );
+      if (initialLink != null && initialLink.isNotEmpty) {
+        await _applyConnectLink(initialLink);
+      }
+    } on MissingPluginException {
+      // The deep-link channel only exists on Android.
+    }
+  }
+
+  Future<dynamic> _handleDeepLinkCall(MethodCall call) async {
+    if (call.method == 'onLink' && call.arguments is String) {
+      await _applyConnectLink(call.arguments as String);
+    }
+  }
+
+  Future<void> _applyConnectLink(String link) async {
+    final uri = Uri.tryParse(link);
+    final host = uri?.queryParameters['host'];
+    final port = uri?.queryParameters['port'];
+    if (uri?.scheme != 'mobiletopcinput' ||
+        uri?.host != 'connect' ||
+        host == null ||
+        port == null) {
+      return;
+    }
+
+    if (_isConnected) {
+      await _disconnect();
+    }
+
+    _hostController.text = host;
+    _portController.text = port;
+    await _saveSettings();
+    await _connect();
   }
 
   Future<void> _saveSettings() async {

@@ -18,6 +18,8 @@ public sealed class ParaformerAsrService : IDisposable
     private CancellationTokenSource? _workerCts;
     private AsrModelOption _model = AsrModelCatalog.DefaultModel;
 
+    public event Action<string>? WorkerStatusChanged;
+
     public AsrModelOption CurrentModel => _model;
 
     public async Task ConfigureModelAsync(AsrModelOption model, CancellationToken cancellationToken = default)
@@ -203,7 +205,7 @@ public sealed class ParaformerAsrService : IDisposable
         }
     }
 
-    private static async Task DrainStderrAsync(Process process, CancellationToken cancellationToken)
+    private async Task DrainStderrAsync(Process process, CancellationToken cancellationToken)
     {
         try
         {
@@ -217,6 +219,7 @@ public sealed class ParaformerAsrService : IDisposable
 
                 if (!string.IsNullOrWhiteSpace(line))
                 {
+                    WorkerStatusChanged?.Invoke(line);
                     LogWorkerStderr(line);
                 }
             }
