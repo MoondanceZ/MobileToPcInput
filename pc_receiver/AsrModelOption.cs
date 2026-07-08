@@ -14,9 +14,8 @@ public sealed class AsrModelOption
     public required string PunctuationModel { get; init; }
     public string Revision { get; init; } = "v2.0.5";
     public bool IsSupported { get; init; } = true;
-    public bool IsDownloaded => IsSupported
-        && AsrModelCatalog.IsModelDownloaded(AsrModel)
-        && AsrModelCatalog.IsModelDownloaded(PunctuationModel);
+    public bool IsDownloaded => IsSupported && AsrModelCatalog.IsModelDownloaded(AsrModel);
+    public bool IsPunctuationDownloaded => IsSupported && AsrModelCatalog.IsPunctuationModelDownloaded(PunctuationModel);
 
     public override string ToString()
     {
@@ -69,8 +68,28 @@ public static class AsrModelCatalog
     public static bool IsModelDownloaded(string modelName)
     {
         var directory = GetModelCacheDirectory(modelName);
-        return File.Exists(Path.Combine(directory, "model_quant.onnx"))
+        var hasModel = File.Exists(Path.Combine(directory, "model_quant.onnx"))
             || File.Exists(Path.Combine(directory, "model.onnx"));
+        var hasConfig = File.Exists(Path.Combine(directory, "asr.yaml"))
+            || File.Exists(Path.Combine(directory, "config.yaml"));
+        var hasTokens = File.Exists(Path.Combine(directory, "tokens.json"))
+            || File.Exists(Path.Combine(directory, "tokens.txt"));
+        return hasModel
+            && hasConfig
+            && hasTokens
+            && File.Exists(Path.Combine(directory, "am.mvn"));
+    }
+
+    public static bool IsPunctuationModelDownloaded(string modelName)
+    {
+        var directory = GetModelCacheDirectory(modelName);
+        var hasModel = File.Exists(Path.Combine(directory, "model_quant.onnx"))
+            || File.Exists(Path.Combine(directory, "model.onnx"));
+        var hasTokens = File.Exists(Path.Combine(directory, "tokens.json"))
+            || File.Exists(Path.Combine(directory, "tokens.txt"));
+        return hasModel
+            && hasTokens
+            && File.Exists(Path.Combine(directory, "config.yaml"));
     }
 
     public static string GetModelCacheDirectory(string modelName)
@@ -86,10 +105,6 @@ public static class AsrModelCatalog
         {
             GetModelCacheDirectory(model.AsrModel)
         };
-        if (!IsPunctuationModelSharedByOtherDownloadedModel(model))
-        {
-            directories.Add(GetModelCacheDirectory(model.PunctuationModel));
-        }
 
         foreach (var directory in directories.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -103,12 +118,5 @@ public static class AsrModelCatalog
         }
 
         return deleted;
-    }
-
-    private static bool IsPunctuationModelSharedByOtherDownloadedModel(AsrModelOption model)
-    {
-        return Models.Any(other => other.Id != model.Id
-            && string.Equals(other.PunctuationModel, model.PunctuationModel, StringComparison.OrdinalIgnoreCase)
-            && IsModelDownloaded(other.AsrModel));
     }
 }

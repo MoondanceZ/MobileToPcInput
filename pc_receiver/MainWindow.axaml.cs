@@ -250,7 +250,7 @@ public partial class MainWindow : Window
         var wasDownloaded = model.IsDownloaded;
         SetModelOperation(
             isRunning: true,
-            message: wasDownloaded ? $"正在加载 {model.DisplayName}..." : $"正在下载 {model.DisplayName}...",
+            message: wasDownloaded ? $"正在加载 {model.DisplayName}..." : $"缺少 {model.DisplayName}，请先放置模型文件...",
             progress: wasDownloaded ? 35 : 8,
             isIndeterminate: false);
         try
@@ -344,49 +344,56 @@ public partial class MainWindow : Window
 
     private void OnAsrWorkerStatus(string message)
     {
-        if (!_isModelOperationRunning)
-        {
-            return;
-        }
-
         var progress = _modelOperationProgress;
         var text = _modelOperationMessage;
-        if (message.Contains("model cache missing", StringComparison.OrdinalIgnoreCase))
+        var statusText = string.Empty;
+        if (message.Contains("loading C# ONNX model", StringComparison.OrdinalIgnoreCase))
         {
-            progress = Math.Max(progress, 15);
-            text = "正在下载模型文件...";
+            progress = Math.Max(progress, 55);
+            text = "正在加载 C# ONNX 语音模型...";
+            statusText = "正在加载 C# ONNX 语音模型...";
         }
-        else if (message.Contains("using cached model", StringComparison.OrdinalIgnoreCase))
-        {
-            progress = Math.Max(progress, 35);
-            text = "正在检查本地模型缓存...";
-        }
-        else if (message.Contains("loading ASR ONNX model", StringComparison.OrdinalIgnoreCase))
-        {
-            progress = Math.Max(progress, 62);
-            text = "正在加载语音识别模型...";
-        }
-        else if (message.Contains("loading punctuation ONNX model", StringComparison.OrdinalIgnoreCase))
-        {
-            progress = Math.Max(progress, 76);
-            text = "正在加载标点模型...";
-        }
-        else if (message.Contains("ONNX models ready", StringComparison.OrdinalIgnoreCase))
-        {
-            progress = Math.Max(progress, 90);
-            text = "模型已加载，正在预热...";
-        }
-        else if (message.Contains("warm-up done", StringComparison.OrdinalIgnoreCase))
+        else if (message.Contains("C# ONNX model ready", StringComparison.OrdinalIgnoreCase))
         {
             progress = Math.Max(progress, 98);
-            text = "模型预热完成...";
+            text = "C# ONNX 模型已就绪...";
+            statusText = "语音模型已就绪";
+        }
+        else if (message.Contains("loading punctuation model", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 82);
+            text = "正在加载标点恢复模型...";
+            statusText = "正在加载标点恢复模型...";
+        }
+        else if (message.Contains("punctuation model ready", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 98);
+            text = "标点恢复模型已就绪...";
+            statusText = "语音和标点模型已就绪";
+        }
+        else if (message.Contains("C# ONNX recognition starting", StringComparison.OrdinalIgnoreCase))
+        {
+            progress = Math.Max(progress, 65);
+            text = "正在识别语音...";
+            statusText = "正在识别语音...";
         }
         else
         {
             return;
         }
 
-        SetModelOperation(isRunning: true, message: text, progress, isIndeterminate: false);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!string.IsNullOrWhiteSpace(statusText))
+            {
+                StatusText.Text = statusText;
+            }
+        });
+
+        if (_isModelOperationRunning)
+        {
+            SetModelOperation(isRunning: true, message: text, progress, isIndeterminate: false);
+        }
     }
 
     private AsrModelOption? GetSelectedModel()
@@ -568,10 +575,12 @@ public partial class MainWindow : Window
             model ??= _asrService.CurrentModel;
             AppLogger.Info($"ASR warm-up starting. model={model.Id}, downloaded={model.IsDownloaded}");
             _isAsrReady = false;
-            Dispatcher.UIThread.Post(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                var verb = model.IsDownloaded ? "加载" : "下载并加载";
-                StatusText.Text = $"正在{verb}语音模型...";
+                var verb = model.IsDownloaded ? "加载" : "查找";
+                SetStatus($"● 正在{verb}语音模型...", "#1769E0", "#EEF6FF");
+                ManageModelButton.IsEnabled = false;
+                DeviceBox.IsEnabled = false;
             });
             await _asrService.ConfigureModelAsync(model);
             await _asrService.WarmUpAsync();
@@ -579,6 +588,8 @@ public partial class MainWindow : Window
             AppLogger.Info($"ASR warm-up completed. model={model.Id}");
             Dispatcher.UIThread.Post(() =>
             {
+                ManageModelButton.IsEnabled = true;
+                DeviceBox.IsEnabled = !StopButton.IsEnabled;
                 if (!StopButton.IsEnabled)
                 {
                     SetStatus("● 未监听，语音模型已就绪", "#C13830", "#FFF1F0");
@@ -593,7 +604,12 @@ public partial class MainWindow : Window
         {
             _isAsrReady = false;
             AppLogger.Error("ASR warm-up failed", ex);
-            Dispatcher.UIThread.Post(() => StatusText.Text = $"语音模型加载失败: {ex.Message}");
+            Dispatcher.UIThread.Post(() =>
+            {
+                ManageModelButton.IsEnabled = true;
+                DeviceBox.IsEnabled = !StopButton.IsEnabled;
+                StatusText.Text = $"语音模型加载失败: {ex.Message}";
+            });
         }
     }
 

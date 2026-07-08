@@ -58,6 +58,18 @@
         <Component Id="SkiaNative" Guid="*">
           <File Source="$(var.PublishDir)\libSkiaSharp.dll" KeyPath="yes" />
         </Component>
+
+        <Component Id="OnnxRuntimeNative" Guid="*">
+          <File Source="$(var.PublishDir)\onnxruntime.dll" KeyPath="yes" />
+        </Component>
+
+        <Component Id="OnnxRuntimeProvidersShared" Guid="*">
+          <File Source="$(var.PublishDir)\onnxruntime_providers_shared.dll" KeyPath="yes" />
+        </Component>
+
+        <Component Id="KaldiNativeFbank" Guid="*">
+          <File Source="$(var.PublishDir)\kaldi-native-fbank.dll" KeyPath="yes" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -81,6 +93,9 @@
       <ComponentRef Id="AvaloniaAngleNative" />
       <ComponentRef Id="HarfBuzzNative" />
       <ComponentRef Id="SkiaNative" />
+      <ComponentRef Id="OnnxRuntimeNative" />
+      <ComponentRef Id="OnnxRuntimeProvidersShared" />
+      <ComponentRef Id="KaldiNativeFbank" />
       <ComponentRef Id="ApplicationProgramsFolderComponent" />
     </Feature>
   </Package>

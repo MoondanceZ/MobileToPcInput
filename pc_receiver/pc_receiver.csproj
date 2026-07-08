@@ -27,9 +27,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="scripts\asr_paraformer.py" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="scripts\asr_worker.py" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="scripts\setup-asr.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Remove="AliParaformerAsr\**\*.cs" />
+    <None Remove="AliParaformerAsr\**\*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,5 +39,9 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="NAudio" Version="2.3.0" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="AliParaformerAsr\AliParaformerAsr.csproj" />
   </ItemGroup>
 </Project>

@@ -102,7 +102,7 @@ public partial class ModelManagerWindow : Window
         {
             MinHeight = 36,
             Padding = new Thickness(14, 8),
-            Content = !model.IsSupported ? "待支持" : isLoaded ? "已加载" : model.IsDownloaded ? "加载" : "下载",
+            Content = !model.IsSupported ? "待支持" : isLoaded ? "已加载" : model.IsDownloaded ? "加载" : "缺少",
             IsEnabled = model.IsSupported && !isLoaded && !isBusy,
             Background = isLoaded ? Brush("#E6EEF8") : Brush("#1769E0"),
             Foreground = isLoaded ? Brush("#536174") : Brushes.White,

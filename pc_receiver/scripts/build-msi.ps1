@@ -66,8 +66,11 @@ if (-not $SkipPublish) {
 $requiredFiles = @(
     "MobileToPcInput.exe",
     "av_libglesv2.dll",
+    "kaldi-native-fbank.dll",
     "libHarfBuzzSharp.dll",
-    "libSkiaSharp.dll"
+    "libSkiaSharp.dll",
+    "onnxruntime.dll",
+    "onnxruntime_providers_shared.dll"
 )
 
 foreach ($file in $requiredFiles) {
@@ -75,6 +78,24 @@ foreach ($file in $requiredFiles) {
     if (-not (Test-Path $path)) {
         throw "Missing publish file: $path"
     }
+}
+
+$legacyAsrRuntimeZip = Join-Path $publishDir "asr_runtime.zip"
+if (Test-Path $legacyAsrRuntimeZip) {
+    Write-Host "Removing stale Python ASR runtime bundle: $legacyAsrRuntimeZip"
+    Remove-Item -LiteralPath $legacyAsrRuntimeZip -Force
+}
+
+$legacyScriptsDir = Join-Path $publishDir "scripts"
+if (Test-Path $legacyScriptsDir) {
+    Write-Host "Removing stale Python ASR scripts: $legacyScriptsDir"
+    Remove-Item -LiteralPath $legacyScriptsDir -Recurse -Force
+}
+
+$legacyFunasrDir = Join-Path $publishDir "funasr"
+if (Test-Path $legacyFunasrDir) {
+    Write-Host "Removing stale native FunASR bundle: $legacyFunasrDir"
+    Remove-Item -LiteralPath $legacyFunasrDir -Recurse -Force
 }
 
 Ensure-Wix

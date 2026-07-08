@@ -1,21 +1,19 @@
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Text.Json;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using AliParaformerAsr;
+using NAudio.Wave;
 
 namespace pc_receiver;
 
 public sealed class ParaformerAsrService : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private Process? _process;
-    private StreamWriter? _stdin;
-    private StreamReader? _stdout;
-    private Task? _stderrTask;
-    private CancellationTokenSource? _workerCts;
+    private readonly PunctuationRestorer _punctuationRestorer = new();
+    private OfflineRecognizer? _recognizer;
     private AsrModelOption _model = AsrModelCatalog.DefaultModel;
 
     public event Action<string>? WorkerStatusChanged;
@@ -32,9 +30,14 @@ public sealed class ParaformerAsrService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            if (_model.Id != model.Id)
+            {
+                DisposeRecognizer();
+                _punctuationRestorer.Dispose();
+            }
+
             _model = model;
-            DisposeProcess();
-            AppLogger.Info($"ASR model configured. id={model.Id}, asr={model.AsrModel}, punc={model.PunctuationModel}");
+            AppLogger.Info($"ASR model configured. id={model.Id}, asr={model.AsrModel}");
         }
         finally
         {
@@ -47,7 +50,7 @@ public sealed class ParaformerAsrService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            DisposeProcess();
+            DisposeRecognizer();
         }
         finally
         {
@@ -60,7 +63,12 @@ public sealed class ParaformerAsrService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            await EnsureWorkerAsync(cancellationToken);
+            await Task.Run(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                EnsureRecognizer();
+                EnsurePunctuationRestorer(cancellationToken);
+            }, cancellationToken);
         }
         finally
         {
@@ -73,53 +81,19 @@ public sealed class ParaformerAsrService : IDisposable
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            await EnsureWorkerAsync(cancellationToken);
-            var id = Guid.NewGuid().ToString("N");
-            var wavBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(wavPath));
-            var request = $"{{\"id\":\"{id}\",\"wav_b64\":\"{wavBase64}\"}}";
-            AppLogger.Info(
-                $"ASR worker request sending. id={id}, requestLength={request.Length}, requestPrefix={request[..Math.Min(48, request.Length)]}, wav={wavPath}");
-            await _stdin!.WriteLineAsync(request);
-            await _stdin.FlushAsync(cancellationToken);
-
-            while (true)
+            return await Task.Run(() =>
             {
-                var line = await _stdout!.ReadLineAsync(cancellationToken);
-                if (line is null)
-                {
-                    throw new InvalidOperationException("ASR worker stdout closed");
-                }
-
-                AppLogger.Info($"ASR worker stdout: {Tail(line, 1200)}");
-                using var document = JsonDocument.Parse(line);
-                var root = document.RootElement;
-                var type = root.GetProperty("type").GetString();
-                if (type is "ready")
-                {
-                    continue;
-                }
-
-                var responseIdText = root.TryGetProperty("id", out var responseId)
-                    ? responseId.GetString()
-                    : null;
-                var isCurrentResponse = responseIdText is null || responseIdText == id;
-                if (!isCurrentResponse)
-                {
-                    continue;
-                }
-
-                if (type is "result")
-                {
-                    var text = root.GetProperty("text").GetString()?.Trim() ?? string.Empty;
-                    AppLogger.Info($"ASR worker result. id={id}, textLength={text.Length}");
-                    return text;
-                }
-
-                if (type is "error" or "fatal")
-                {
-                    throw new InvalidOperationException(root.GetProperty("error").GetString());
-                }
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                var recognizer = EnsureRecognizer();
+                WorkerStatusChanged?.Invoke("C# ONNX recognition starting");
+                AppLogger.Info($"C# ASR request starting. model={_model.Id}, wav={wavPath}");
+                var samples = LoadWavSamples(wavPath);
+                var results = recognizer.GetResults([samples]);
+                var text = results.FirstOrDefault()?.Trim() ?? string.Empty;
+                text = RestorePunctuation(text);
+                AppLogger.Info($"C# ASR result. textLength={text.Length}");
+                return text;
+            }, cancellationToken);
         }
         finally
         {
@@ -127,172 +101,121 @@ public sealed class ParaformerAsrService : IDisposable
         }
     }
 
-    private async Task EnsureWorkerAsync(CancellationToken cancellationToken)
+    private OfflineRecognizer EnsureRecognizer()
     {
-        if (_process is { HasExited: false })
+        if (_recognizer is not null)
+        {
+            return _recognizer;
+        }
+
+        var modelDirectory = AsrModelCatalog.GetModelCacheDirectory(_model.AsrModel);
+        var modelFilePath = FindRequiredFile(modelDirectory, "model_quant.onnx", "model.onnx");
+        var configFilePath = FindRequiredFile(modelDirectory, "asr.yaml", "config.yaml");
+        var mvnFilePath = FindRequiredFile(modelDirectory, "am.mvn");
+        var tokensFilePath = FindRequiredFile(modelDirectory, "tokens.json", "tokens.txt");
+        var threads = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+
+        WorkerStatusChanged?.Invoke("loading C# ONNX model");
+        AppLogger.Info(
+            $"C# ASR model loading. model={_model.Id}, modelFile={modelFilePath}, config={configFilePath}, threads={threads}");
+        _recognizer = new OfflineRecognizer(
+            modelFilePath,
+            configFilePath,
+            mvnFilePath,
+            tokensFilePath,
+            threads,
+            OnnxRumtimeTypes.CPU);
+        WorkerStatusChanged?.Invoke("C# ONNX model ready");
+        AppLogger.Info($"C# ASR model ready. model={_model.Id}");
+        return _recognizer;
+    }
+
+    private void EnsurePunctuationRestorer(CancellationToken cancellationToken)
+    {
+        if (!_model.IsPunctuationDownloaded)
+        {
+            AppLogger.Info($"Punctuation model skipped because it is not downloaded. model={_model.PunctuationModel}");
+            return;
+        }
+
+        if (_punctuationRestorer.IsLoaded)
         {
             return;
         }
 
-        DisposeProcess();
-        _workerCts = new CancellationTokenSource();
-        var model = _model;
-
-        var scriptPath = FindExistingPath(
-            Path.Combine(AppContext.BaseDirectory, "scripts", "asr_worker.py"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "scripts", "asr_worker.py"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "scripts", "asr_worker.py"));
-        if (scriptPath is null)
-        {
-            throw new FileNotFoundException("找不到 ASR worker 脚本 scripts/asr_worker.py");
-        }
-
-        var pythonPath = FindExistingPath(
-            Path.Combine(AppContext.BaseDirectory, "asr_runtime", ".venv", "Scripts", "python.exe"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "asr_runtime", ".venv", "Scripts", "python.exe"),
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "asr_runtime", ".venv", "Scripts", "python.exe"))
-            ?? "python";
-
-        var psi = new ProcessStartInfo
-        {
-            FileName = pythonPath,
-            Arguments = $"\"{scriptPath}\"",
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8
-        };
-        psi.Environment["FUNASR_MODEL_REVISION"] = model.Revision;
-        psi.Environment["FUNASR_ASR_MODEL"] = model.AsrModel;
-        psi.Environment["FUNASR_PUNC_MODEL"] = model.PunctuationModel;
-
-        AppLogger.Info(
-            $"ASR worker starting. python={pythonPath}, script={scriptPath}, model={model.Id}, revision={model.Revision}");
-        _process = Process.Start(psi)
-            ?? throw new InvalidOperationException("无法启动 Python ASR worker");
-        _stdin = _process.StandardInput;
-        _stdout = _process.StandardOutput;
-        _stderrTask = Task.Run(() => DrainStderrAsync(_process, _workerCts.Token));
-        AppLogger.Info($"ASR worker process started. pid={_process.Id}");
-
-        using var readyCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        readyCts.CancelAfter(TimeSpan.FromMinutes(5));
-        while (true)
-        {
-            var line = await _stdout.ReadLineAsync(readyCts.Token);
-            if (line is null)
-            {
-                throw new InvalidOperationException("ASR worker exited before ready");
-            }
-
-            AppLogger.Info($"ASR worker stdout: {Tail(line, 1200)}");
-            using var document = JsonDocument.Parse(line);
-            var type = document.RootElement.GetProperty("type").GetString();
-            if (type is "ready")
-            {
-                AppLogger.Info("ASR worker ready.");
-                return;
-            }
-
-            if (type is "fatal")
-            {
-                throw new InvalidOperationException(document.RootElement.GetProperty("error").GetString());
-            }
-        }
+        var modelDirectory = AsrModelCatalog.GetModelCacheDirectory(_model.PunctuationModel);
+        var threads = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+        WorkerStatusChanged?.Invoke("loading punctuation model");
+        AppLogger.Info($"Punctuation model loading. model={_model.PunctuationModel}, directory={modelDirectory}, threads={threads}");
+        _punctuationRestorer.Load(modelDirectory, threads, cancellationToken);
+        WorkerStatusChanged?.Invoke("punctuation model ready");
+        AppLogger.Info($"Punctuation model ready. model={_model.PunctuationModel}");
     }
 
-    private async Task DrainStderrAsync(Process process, CancellationToken cancellationToken)
+    private string RestorePunctuation(string text)
     {
+        if (string.IsNullOrWhiteSpace(text) || !_punctuationRestorer.IsLoaded)
+        {
+            return text;
+        }
+
         try
         {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var line = await process.StandardError.ReadLineAsync(cancellationToken);
-                if (line is null)
-                {
-                    return;
-                }
-
-                if (!string.IsNullOrWhiteSpace(line))
-                {
-                    WorkerStatusChanged?.Invoke(line);
-                    LogWorkerStderr(line);
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
+            return _punctuationRestorer.Restore(text);
         }
         catch (Exception ex)
         {
-            AppLogger.Error("ASR worker stderr reader failed", ex);
+            AppLogger.Error("Punctuation restoration failed", ex);
+            return text;
         }
     }
 
-    private static string? FindExistingPath(params string[] paths)
+    private static string FindRequiredFile(string directory, params string[] fileNames)
     {
-        foreach (var path in paths)
+        if (!Directory.Exists(directory))
         {
-            var fullPath = Path.GetFullPath(path);
-            if (File.Exists(fullPath))
+            throw new DirectoryNotFoundException($"模型目录不存在: {directory}");
+        }
+
+        foreach (var fileName in fileNames)
+        {
+            var path = Path.Combine(directory, fileName);
+            if (File.Exists(path))
             {
-                return fullPath;
+                return path;
             }
         }
 
-        return null;
+        throw new FileNotFoundException($"模型目录缺少文件: {string.Join(" 或 ", fileNames)}。目录: {directory}");
     }
 
-    private static string Tail(string value, int maxLength)
+    private static float[] LoadWavSamples(string wavPath)
     {
-        value = value.ReplaceLineEndings(" | ");
-        return value.Length <= maxLength ? value : value[^maxLength..];
-    }
-
-    private static void LogWorkerStderr(string line)
-    {
-        if (line.Contains("Downloading:", StringComparison.Ordinal)
-            || line.Contains("modelscope_hub.download", StringComparison.Ordinal)
-            || line.Contains("WARNING:root:trust_remote_code", StringComparison.Ordinal)
-            || line.Contains("DEBUG:jieba:", StringComparison.Ordinal))
+        using var reader = new AudioFileReader(wavPath);
+        var samples = new List<float>((int)Math.Min(reader.Length / sizeof(float), int.MaxValue));
+        var buffer = new float[reader.WaveFormat.SampleRate * Math.Max(1, reader.WaveFormat.Channels)];
+        int read;
+        while ((read = reader.Read(buffer, 0, buffer.Length)) > 0)
         {
-            return;
-        }
-
-        AppLogger.Info($"ASR worker stderr: {Tail(line, 1200)}");
-    }
-
-    private void DisposeProcess()
-    {
-        try
-        {
-            if (_process is { HasExited: false })
+            for (var i = 0; i < read; i += reader.WaveFormat.Channels)
             {
-                _process.Kill(entireProcessTree: true);
+                samples.Add(buffer[i] * 32768f);
             }
         }
-        catch
-        {
-        }
 
-        _workerCts?.Cancel();
-        _stdin?.Dispose();
-        _stdout?.Dispose();
-        _process?.Dispose();
-        _workerCts?.Dispose();
-        _stdin = null;
-        _stdout = null;
-        _process = null;
-        _workerCts = null;
+        return samples.ToArray();
+    }
+
+    private void DisposeRecognizer()
+    {
+        _recognizer?.Dispose();
+        _recognizer = null;
     }
 
     public void Dispose()
     {
-        DisposeProcess();
+        DisposeRecognizer();
+        _punctuationRestorer.Dispose();
         _gate.Dispose();
     }
 }
