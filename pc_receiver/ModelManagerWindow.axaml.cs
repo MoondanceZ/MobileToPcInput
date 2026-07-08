@@ -19,6 +19,7 @@ public partial class ModelManagerWindow : Window
     private readonly Func<ModelOperationSnapshot> _getOperationSnapshot;
     private readonly Action<Action> _subscribeOperationChanged;
     private readonly Action<Action> _unsubscribeOperationChanged;
+    private bool _lastOperationIsRunning;
 
     public ModelManagerWindow()
         : this(
@@ -61,6 +62,7 @@ public partial class ModelManagerWindow : Window
         Surface.AddHandler(PointerPressedEvent, DragWindowFromTopArea, RoutingStrategies.Tunnel);
         TitleBar.AddHandler(PointerPressedEvent, DragWindow, RoutingStrategies.Tunnel);
         _subscribeOperationChanged(OnModelOperationChanged);
+        _lastOperationIsRunning = _getOperationSnapshot().IsRunning;
         RenderModels();
     }
 
@@ -213,12 +215,24 @@ public partial class ModelManagerWindow : Window
 
     private void OnModelOperationChanged()
     {
-        RenderModels();
+        var snapshot = _getOperationSnapshot();
+        if (snapshot.IsRunning != _lastOperationIsRunning)
+        {
+            _lastOperationIsRunning = snapshot.IsRunning;
+            RenderModels();
+            return;
+        }
+
+        ApplyOperationSnapshot(snapshot);
     }
 
     private void ApplyOperationSnapshot()
     {
-        var snapshot = _getOperationSnapshot();
+        ApplyOperationSnapshot(_getOperationSnapshot());
+    }
+
+    private void ApplyOperationSnapshot(ModelOperationSnapshot snapshot)
+    {
         StatusText.Text = string.IsNullOrWhiteSpace(snapshot.Message)
             ? "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。"
             : snapshot.Message;

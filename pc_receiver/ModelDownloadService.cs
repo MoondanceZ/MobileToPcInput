@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -196,6 +197,8 @@ public sealed class ModelDownloadService
 
         var buffer = new byte[1024 * 128];
         long downloadedBytes = 0;
+        var lastProgressReport = Stopwatch.GetTimestamp();
+        double lastReportedOverall = -1;
         while (true)
         {
             var read = await input.ReadAsync(buffer, cancellationToken);
@@ -212,11 +215,30 @@ public sealed class ModelDownloadService
                 var overall = useByteWeightedProgress && totalDownloadBytes > 0
                     ? Math.Clamp((completedBytesBeforeFile + downloadedBytes) * 100d / totalDownloadBytes, 0, 99)
                     : Math.Clamp(baseProgress + fileProgress * progressWeight / 100d, 0, 99);
-                progress?.Report(new ModelDownloadProgress(
-                    BuildProgressMessage(modelDisplayName, fileName, downloadedBytes, totalBytes.Value, completedBytesBeforeFile, totalDownloadBytes, useByteWeightedProgress),
-                    overall,
-                    false));
+                var now = Stopwatch.GetTimestamp();
+                var elapsed = Stopwatch.GetElapsedTime(lastProgressReport, now);
+                if (overall - lastReportedOverall >= 0.5 || elapsed >= TimeSpan.FromMilliseconds(150))
+                {
+                    progress?.Report(new ModelDownloadProgress(
+                        BuildProgressMessage(modelDisplayName, fileName, downloadedBytes, totalBytes.Value, completedBytesBeforeFile, totalDownloadBytes, useByteWeightedProgress),
+                        overall,
+                        false));
+                    lastProgressReport = now;
+                    lastReportedOverall = overall;
+                }
             }
+        }
+
+        if (totalBytes is > 0)
+        {
+            var fileProgress = Math.Clamp(downloadedBytes * 100d / totalBytes.Value, 0, 100);
+            var overall = useByteWeightedProgress && totalDownloadBytes > 0
+                ? Math.Clamp((completedBytesBeforeFile + downloadedBytes) * 100d / totalDownloadBytes, 0, 99)
+                : Math.Clamp(baseProgress + fileProgress * progressWeight / 100d, 0, 99);
+            progress?.Report(new ModelDownloadProgress(
+                BuildProgressMessage(modelDisplayName, fileName, downloadedBytes, totalBytes.Value, completedBytesBeforeFile, totalDownloadBytes, useByteWeightedProgress),
+                overall,
+                false));
         }
 
         output.Close();

@@ -258,7 +258,7 @@ public partial class MainWindow : Window
         {
             if (!wasDownloaded)
             {
-                var progress = new Progress<ModelDownloadProgress>(item =>
+                var progress = new ActionProgress<ModelDownloadProgress>(item =>
                 {
                     SetModelOperation(
                         isRunning: true,
@@ -355,11 +355,22 @@ public partial class MainWindow : Window
 
     private void SetModelOperation(bool isRunning, string message, double progress, bool isIndeterminate)
     {
-        _isModelOperationRunning = isRunning;
-        _modelOperationMessage = message;
-        _modelOperationProgress = Math.Clamp(progress, 0, 100);
-        _modelOperationIsIndeterminate = isIndeterminate;
-        Dispatcher.UIThread.Post(() => ModelOperationChanged?.Invoke());
+        void Apply()
+        {
+            _isModelOperationRunning = isRunning;
+            _modelOperationMessage = message;
+            _modelOperationProgress = Math.Clamp(progress, 0, 100);
+            _modelOperationIsIndeterminate = isIndeterminate;
+            ModelOperationChanged?.Invoke();
+        }
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            Apply();
+            return;
+        }
+
+        Dispatcher.UIThread.Post(Apply);
     }
 
     private void OnAsrWorkerStatus(string message)
@@ -727,6 +738,14 @@ public partial class MainWindow : Window
         }
 
         return false;
+    }
+
+    private sealed class ActionProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value)
+        {
+            report(value);
+        }
     }
 
     private void ExitApplication()
