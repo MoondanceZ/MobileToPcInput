@@ -21,9 +21,7 @@ class MobileToPcInputApp extends StatelessWidget {
     return MaterialApp(
       title: '手机麦克风',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xff2f6fed),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff2f6fed)),
         useMaterial3: true,
       ),
       home: const MicrophoneBridgePage(),
@@ -71,15 +69,25 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     final prefs = await SharedPreferences.getInstance();
     _hostController.text = prefs.getString(_hostKey) ?? '';
     _portController.text = prefs.getString(_portKey) ?? '8765';
+    var didApplyInitialLink = false;
     try {
       final initialLink = await _deepLinkChannel.invokeMethod<String?>(
         'getInitialLink',
       );
       if (initialLink != null && initialLink.isNotEmpty) {
         await _applyConnectLink(initialLink);
+        didApplyInitialLink = true;
       }
     } on MissingPluginException {
       // The deep-link channel only exists on Android.
+    }
+
+    if (!didApplyInitialLink && _hasValidReceiverEndpoint()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_isConnected && !_isConnecting) {
+          unawaited(_connect());
+        }
+      });
     }
   }
 
@@ -116,6 +124,12 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     await prefs.setString(_portKey, _portController.text.trim());
   }
 
+  bool _hasValidReceiverEndpoint() {
+    final host = _hostController.text.trim();
+    final port = int.tryParse(_portController.text.trim());
+    return host.isNotEmpty && port != null && port > 0 && port <= 65535;
+  }
+
   Future<void> _connect() async {
     final host = _hostController.text.trim();
     final port = int.tryParse(_portController.text.trim());
@@ -131,8 +145,10 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     });
 
     try {
-      final socket = await Socket.connect(host, port)
-          .timeout(const Duration(seconds: 5));
+      final socket = await Socket.connect(
+        host,
+        port,
+      ).timeout(const Duration(seconds: 5));
       await _socketSubscription?.cancel();
       _socketSubscription = socket.listen(
         (_) {},
@@ -234,7 +250,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       return;
     }
 
-    _isReconnecting = true;
+    setState(() => _isReconnecting = true);
     for (var attempt = 1; mounted && !_manualDisconnect; attempt++) {
       final waitMs = min(5000, 500 * attempt);
       await Future<void>.delayed(Duration(milliseconds: waitMs));
@@ -248,7 +264,11 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       }
     }
 
-    _isReconnecting = false;
+    if (mounted) {
+      setState(() => _isReconnecting = false);
+    } else {
+      _isReconnecting = false;
+    }
   }
 
   void _handleSocketClosed(String status) {
@@ -355,6 +375,12 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
   }
 
+  void _showScanHint() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('请使用系统相机扫描电脑端二维码，或手动输入 IP 和端口。')),
+    );
+  }
+
   @override
   void dispose() {
     _audioSubscription?.cancel();
@@ -368,115 +394,269 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
   @override
   Widget build(BuildContext context) {
-    final canTalk = _isConnected && !_isConnecting;
+    final isConnectionBusy = _isConnecting || _isReconnecting;
+    final canTalk = _isConnected && !isConnectionBusy;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('手机麦克风'),
-      ),
+      backgroundColor: const Color(0xffeef6ff),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.fromLTRB(20, 46, 20, 28),
           children: [
-            Text(
-              '电脑接收器',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _hostController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '电脑 IP',
-                hintText: '例如 192.168.1.20',
-                border: OutlineInputBorder(),
+            _SoftCard(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '电脑接收器',
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                color: const Color(0xff10213b),
+                                fontWeight: FontWeight.w900,
+                              ),
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: isConnectionBusy ? null : _showScanHint,
+                        icon: const Icon(Icons.qr_code_scanner, size: 22),
+                        label: const Text('扫码'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xffe3e8ff),
+                          disabledBackgroundColor: const Color(0xffe4e4e4),
+                          foregroundColor: const Color(0xff10213b),
+                          disabledForegroundColor: const Color(0xff9a9a9a),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 13,
+                          ),
+                          textStyle: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        flex: 9,
+                        child: _SoftTextField(
+                          controller: _hostController,
+                          enabled: !_isConnected && !isConnectionBusy,
+                          labelText: '电脑 IP',
+                          hintText: '例如 192.168.1.20',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 5,
+                        child: _SoftTextField(
+                          controller: _portController,
+                          enabled: !_isConnected && !isConnectionBusy,
+                          labelText: '端口',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    height: 58,
+                    child: FilledButton.icon(
+                      onPressed: isConnectionBusy
+                          ? null
+                          : _isConnected
+                          ? _disconnect
+                          : _connect,
+                      icon: Icon(_isConnected ? Icons.link_off : Icons.wifi),
+                      label: Text(_isConnected ? '断开连接' : '连接电脑'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xff536ba8),
+                        disabledBackgroundColor: const Color(0xffb9c4d6),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(28),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              enabled: !_isConnected && !_isConnecting,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _portController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '端口',
-                border: OutlineInputBorder(),
-              ),
-              enabled: !_isConnected && !_isConnecting,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _isConnecting
-                  ? null
-                  : _isConnected
-                      ? _disconnect
-                      : _connect,
-              icon: Icon(_isConnected ? Icons.link_off : Icons.wifi),
-              label: Text(_isConnected ? '断开连接' : '连接电脑'),
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 22),
             _StatusPanel(
               status: _status,
               isConnected: _isConnected,
+              isConnecting: _isConnecting,
+              isReconnecting: _isReconnecting,
               isRecording: _isRecording,
               level: _level,
+              onRetry: _connect,
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 66),
             GestureDetector(
               onTapDown: canTalk ? (_) => _startRecording() : null,
               onTapUp: canTalk ? (_) => _stopRecording() : null,
               onTapCancel: canTalk ? _stopRecording : null,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 120),
-                height: 176,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _isRecording
-                      ? const Color(0xffe54646)
-                      : canTalk
-                          ? const Color(0xff2f6fed)
-                          : Colors.grey.shade300,
-                  boxShadow: _isRecording
-                      ? [
-                          BoxShadow(
-                            color: const Color(0xffe54646)
-                                .withValues(alpha: 0.3),
-                            blurRadius: 24,
-                            spreadRadius: 8,
-                          ),
-                        ]
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.mic,
-                      color: canTalk ? Colors.white : Colors.grey.shade600,
-                      size: 56,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isRecording ? '松开停止' : '按住说话',
-                      style: TextStyle(
-                        color: canTalk ? Colors.white : Colors.grey.shade700,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
+              child: Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 140),
+                  width: 188,
+                  height: 188,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isRecording
+                        ? const Color(0xffe66b6b)
+                        : canTalk
+                        ? const Color(0xff536ba8)
+                        : const Color(0xffcbd5e6),
+                    boxShadow: [
+                      BoxShadow(
+                        color:
+                            (_isRecording
+                                    ? const Color(0xffe66b6b)
+                                    : const Color(0xff9fb0ca))
+                                .withValues(alpha: 0.22),
+                        blurRadius: 30,
+                        offset: const Offset(0, 16),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.mic, color: Colors.white, size: 48),
+                      const SizedBox(height: 10),
+                      Text(
+                        _isRecording ? '松开停止' : '按住说话',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 34),
             Text(
-              '请先在电脑端启动接收器，并让手机和电脑连接同一个 WiFi。',
+              _isConnected ? '正在使用电脑语音输入' : '连接电脑后启用语音输入',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Colors.grey.shade700,
-                  ),
+              style: const TextStyle(
+                color: Color(0xff718096),
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SoftCard extends StatelessWidget {
+  const _SoftCard({
+    required this.child,
+    this.padding = const EdgeInsets.all(20),
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0xffdce8f4)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xff6d88a8).withValues(alpha: 0.10),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _SoftTextField extends StatelessWidget {
+  const _SoftTextField({
+    required this.controller,
+    required this.enabled,
+    required this.labelText,
+    this.hintText,
+  });
+
+  final TextEditingController controller;
+  final bool enabled;
+  final String labelText;
+  final String? hintText;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      keyboardType: TextInputType.number,
+      style: const TextStyle(
+        color: Color(0xff10213b),
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+      ),
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: const Color(0xfff7f9fd),
+        labelText: labelText,
+        hintText: hintText,
+        labelStyle: const TextStyle(
+          color: Color(0xff6f7a8f),
+          fontSize: 17,
+          fontWeight: FontWeight.w500,
+        ),
+        hintStyle: const TextStyle(
+          color: Color(0xff6f7a8f),
+          fontSize: 17,
+          fontWeight: FontWeight.w500,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 19,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: const BorderSide(color: Color(0xff88a2d8), width: 1.4),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide.none,
         ),
       ),
     );
@@ -487,44 +667,132 @@ class _StatusPanel extends StatelessWidget {
   const _StatusPanel({
     required this.status,
     required this.isConnected,
+    required this.isConnecting,
+    required this.isReconnecting,
     required this.isRecording,
     required this.level,
+    required this.onRetry,
   });
 
   final String status;
   final bool isConnected;
+  final bool isConnecting;
+  final bool isReconnecting;
   final bool isRecording;
   final double level;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
+    final statusTitle = isRecording
+        ? '正在说话'
+        : isReconnecting
+        ? '正在重连'
+        : isConnecting
+        ? '正在连接'
+        : isConnected
+        ? '已连接'
+        : status;
+    final isBusy = isConnecting || isReconnecting;
+
+    return _SoftCard(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Icon(
                 isConnected ? Icons.check_circle : Icons.info,
-                color: isConnected ? Colors.green : Colors.grey,
+                color: const Color(0xff68748a),
+                size: 28,
               ),
-              const SizedBox(width: 8),
-              Expanded(child: Text(status)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  statusTitle,
+                  style: const TextStyle(
+                    color: Color(0xff10213b),
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    height: 1.12,
+                  ),
+                ),
+              ),
+              if (isBusy) ...[
+                const SizedBox(width: 14),
+                _RetryStatusAction(isBusy: true, onRetry: onRetry),
+              ] else if (!isConnected) ...[
+                const SizedBox(width: 14),
+                _RetryStatusAction(isBusy: false, onRetry: onRetry),
+              ],
             ],
           ),
-          const SizedBox(height: 12),
-          LinearProgressIndicator(
-            value: isRecording ? level : 0,
-            minHeight: 10,
+          if (!isBusy) ...[
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.only(left: 40),
+              child: Text(
+                isConnected ? '保持手机和电脑在同一个 WiFi 下' : '扫描或输入电脑端显示的 IP 和端口',
+                style: const TextStyle(
+                  color: Color(0xff718096),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 22),
+          ClipRRect(
             borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: isRecording ? level : 0,
+              minHeight: 10,
+              backgroundColor: const Color(0xffe4ebf7),
+              color: const Color(0xff536ba8),
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RetryStatusAction extends StatelessWidget {
+  const _RetryStatusAction({required this.isBusy, required this.onRetry});
+
+  final bool isBusy;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isBusy) {
+      return const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.8,
+          color: Color(0xff536ba8),
+        ),
+      );
+    }
+
+    return IconButton(
+      onPressed: onRetry,
+      icon: const SizedBox(
+        width: 22,
+        height: 22,
+        child: CircularProgressIndicator(
+          strokeWidth: 2.6,
+          color: Color(0xff536ba8),
+        ),
+      ),
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      tooltip: '重试连接',
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }
