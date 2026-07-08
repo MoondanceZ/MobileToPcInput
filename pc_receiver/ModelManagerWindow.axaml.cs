@@ -97,7 +97,7 @@ public partial class ModelManagerWindow : Window
         };
         var desc = new TextBlock
         {
-            Text = $"{model.Description}  状态：ASR {(model.IsDownloaded ? "已就绪" : "未下载")} · 标点 {(model.IsPunctuationDownloaded ? "已就绪" : "未下载")} · VAD {(model.IsVadDownloaded ? "已就绪" : "未下载")}",
+            Text = model.Description,
             FontSize = 12,
             Foreground = Brush("#718096"),
             TextWrapping = TextWrapping.Wrap

@@ -358,3 +358,4 @@ bin/
 
 .tmp-build/
 .ref/
+release-artifacts/

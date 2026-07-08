@@ -463,12 +463,12 @@ public partial class MainWindow : Window
             {
                 StatusText.Text = statusText;
             }
-        });
 
-        if (_isModelOperationRunning)
-        {
-            SetModelOperation(isRunning: true, message: text, progress, isIndeterminate: false);
-        }
+            if (_isModelOperationRunning)
+            {
+                SetModelOperation(isRunning: true, message: text, progress, isIndeterminate: false);
+            }
+        });
     }
 
     private AsrModelOption? GetSelectedModel()
