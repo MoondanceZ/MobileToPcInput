@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly AsrSessionBuffer _asrBuffer = new();
     private readonly ParaformerAsrService _asrService = new();
     private readonly ModelDownloadService _modelDownloadService = new();
+    private readonly AppSettingsService _settingsService = new();
     private readonly StartupService _startupService = new();
     private readonly TrayIcon _trayIcon;
     private readonly NativeMenuItem _trayStartItem;
@@ -34,6 +35,7 @@ public partial class MainWindow : Window
     private bool _isModelOperationRunning;
     private bool _isRefreshingModels;
     private bool _isApplyingSelectedModel;
+    private AppSettings _settings = new();
     private string _modelOperationMessage = "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。";
     private double _modelOperationProgress;
     private bool _modelOperationIsIndeterminate;
@@ -53,14 +55,23 @@ public partial class MainWindow : Window
             WindowTransparencyLevel.None
         ];
         Background = Brushes.Transparent;
+        _settings = _settingsService.Load();
         InitializeComponent();
         Surface.AddHandler(PointerPressedEvent, DragWindowFromTopArea, RoutingStrategies.Tunnel);
         TitleBar.AddHandler(PointerPressedEvent, DragWindow, RoutingStrategies.Tunnel);
         SetAppImages();
-        StartupBox.IsChecked = _startupService.IsEnabled();
+        PortBox.Text = IsValidPort(_settings.Port) ? _settings.Port.ToString() : "8765";
+        var startupEnabled = _startupService.IsEnabled();
+        StartupBox.IsChecked = startupEnabled;
+        _settings.StartupEnabled = startupEnabled;
+        SaveSettings();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
         DeviceBox.SelectionChanged += async (_, _) => await ApplySelectedModelAsync();
-        PortBox.TextChanged += (_, _) => UpdateConnectQrCode();
+        PortBox.TextChanged += (_, _) =>
+        {
+            UpdateConnectQrCode();
+            SavePortSetting();
+        };
         _asrService.WorkerStatusChanged += OnAsrWorkerStatus;
 
         _trayStartItem = new NativeMenuItem("开始监听");
@@ -207,7 +218,7 @@ public partial class MainWindow : Window
 
     private void RefreshModels()
     {
-        var selectedId = GetSelectedModel()?.Id ?? _asrService.CurrentModel.Id;
+        var selectedId = GetSelectedModel()?.Id ?? GetConfiguredModelId() ?? _asrService.CurrentModel.Id;
         _isRefreshingModels = true;
         try
         {
@@ -308,6 +319,7 @@ public partial class MainWindow : Window
                 progress: 72,
                 isIndeterminate: false);
             await WarmUpAsrAsync(model);
+            SaveSelectedModelSetting(model);
             SetModelOperation(
                 isRunning: false,
                 message: _isAsrReady && _asrService.CurrentModel.Id == model.Id
@@ -523,6 +535,7 @@ public partial class MainWindow : Window
             }
 
             await WarmUpAsrAsync(model);
+            SaveSelectedModelSetting(model);
         }
         finally
         {
@@ -624,6 +637,8 @@ public partial class MainWindow : Window
             var actual = _startupService.IsEnabled();
             StartupBox.IsChecked = actual;
             _trayStartupItem.IsChecked = actual;
+            _settings.StartupEnabled = actual;
+            SaveSettings();
         }
         catch (Exception ex)
         {
@@ -632,6 +647,8 @@ public partial class MainWindow : Window
             var actual = _startupService.IsEnabled();
             StartupBox.IsChecked = actual;
             _trayStartupItem.IsChecked = actual;
+            _settings.StartupEnabled = actual;
+            SaveSettings();
         }
     }
 
@@ -768,7 +785,7 @@ public partial class MainWindow : Window
 
     private async Task WarmUpAsrOnStartupAsync()
     {
-        var model = _asrService.CurrentModel;
+        var model = GetSelectedModel() ?? _asrService.CurrentModel;
         if (!model.IsDownloaded)
         {
             _isAsrReady = false;
@@ -821,6 +838,44 @@ public partial class MainWindow : Window
         {
             ExitApplication();
         }
+    }
+
+    private string? GetConfiguredModelId()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.SelectedModelId))
+        {
+            return null;
+        }
+
+        var model = AsrModelCatalog.Models.FirstOrDefault(item => item.Id == _settings.SelectedModelId);
+        return model?.IsDownloaded == true ? model.Id : null;
+    }
+
+    private void SavePortSetting()
+    {
+        if (!int.TryParse(PortBox.Text, out var port) || !IsValidPort(port))
+        {
+            return;
+        }
+
+        _settings.Port = port;
+        SaveSettings();
+    }
+
+    private void SaveSelectedModelSetting(AsrModelOption model)
+    {
+        _settings.SelectedModelId = model.Id;
+        SaveSettings();
+    }
+
+    private void SaveSettings()
+    {
+        _settingsService.Save(_settings);
+    }
+
+    private static bool IsValidPort(int port)
+    {
+        return port > 0 && port <= 65535;
     }
 
     private async Task<bool> ShowCloseConfirmationAsync()
