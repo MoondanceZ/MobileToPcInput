@@ -6,10 +6,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   runApp(const MobileToPcInputApp());
 }
 
@@ -54,6 +57,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _isReconnecting = false;
   bool _isRecording = false;
   bool _isStoppingRecording = false;
+  bool _isHandlingSocketClosed = false;
   bool _isAsrSessionActive = false;
   double _level = 0;
   String _status = '未连接';
@@ -75,8 +79,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         'getInitialLink',
       );
       if (initialLink != null && initialLink.isNotEmpty) {
-        await _applyConnectLink(initialLink);
-        didApplyInitialLink = true;
+        didApplyInitialLink = await _applyConnectLink(initialLink);
       }
     } on MissingPluginException {
       // The deep-link channel only exists on Android.
@@ -97,7 +100,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
   }
 
-  Future<void> _applyConnectLink(String link) async {
+  Future<bool> _applyConnectLink(String link) async {
     final uri = Uri.tryParse(link);
     final host = uri?.queryParameters['host'];
     final port = uri?.queryParameters['port'];
@@ -105,7 +108,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         uri?.host != 'connect' ||
         host == null ||
         port == null) {
-      return;
+      return false;
     }
 
     if (_isConnected) {
@@ -116,6 +119,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     _portController.text = port;
     await _saveSettings();
     await _connect();
+    return true;
   }
 
   Future<void> _saveSettings() async {
@@ -149,6 +153,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         host,
         port,
       ).timeout(const Duration(seconds: 5));
+      socket.setOption(SocketOption.tcpNoDelay, true);
       await _socketSubscription?.cancel();
       _socketSubscription = socket.listen(
         (_) {},
@@ -272,10 +277,11 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   }
 
   void _handleSocketClosed(String status) {
-    if (!mounted || _socket == null) {
+    if (!mounted || _socket == null || _isHandlingSocketClosed) {
       return;
     }
 
+    _isHandlingSocketClosed = true;
     unawaited(_stopRecording());
     setState(() {
       _socket = null;
@@ -285,6 +291,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     if (!_manualDisconnect) {
       unawaited(_reconnect());
     }
+    _isHandlingSocketClosed = false;
   }
 
   bool _sendControlMessage(String type) {
@@ -308,8 +315,12 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     final header = ByteData(5)
       ..setUint8(0, type)
       ..setUint32(1, payload.length, Endian.big);
-    socket.add(header.buffer.asUint8List());
-    socket.add(payload);
+    try {
+      socket.add(header.buffer.asUint8List());
+      socket.add(payload);
+    } catch (_) {
+      _handleSocketClosed('正在重连...');
+    }
   }
 
   Future<void> _stopRecording() async {
@@ -375,10 +386,20 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
   }
 
-  void _showScanHint() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('请使用系统相机扫描电脑端二维码，或手动输入 IP 和端口。')),
-    );
+  Future<void> _openQrScanner() async {
+    final code = await Navigator.of(
+      context,
+    ).push<String>(MaterialPageRoute(builder: (_) => const _QrScannerPage()));
+    if (!mounted || code == null || code.isEmpty) {
+      return;
+    }
+
+    final applied = await _applyConnectLink(code);
+    if (!applied && mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('二维码不是有效的电脑连接地址。')));
+    }
   }
 
   @override
@@ -421,7 +442,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
                         ),
                       ),
                       FilledButton.icon(
-                        onPressed: isConnectionBusy ? null : _showScanHint,
+                        onPressed: isConnectionBusy ? null : _openQrScanner,
                         icon: const Icon(Icons.qr_code_scanner, size: 22),
                         label: const Text('扫码'),
                         style: FilledButton.styleFrom(
@@ -560,6 +581,131 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
                 color: Color(0xff718096),
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QrScannerPage extends StatefulWidget {
+  const _QrScannerPage();
+
+  @override
+  State<_QrScannerPage> createState() => _QrScannerPageState();
+}
+
+class _QrScannerPageState extends State<_QrScannerPage> {
+  final MobileScannerController _controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+    formats: [BarcodeFormat.qrCode],
+  );
+  bool _hasResult = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_hasResult) {
+      return;
+    }
+
+    for (final barcode in capture.barcodes) {
+      final code = barcode.rawValue;
+      if (code == null || code.isEmpty) {
+        continue;
+      }
+
+      _hasResult = true;
+      Navigator.of(context).pop(code);
+      return;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xff07101f),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: MobileScanner(
+                controller: _controller,
+                onDetect: _onDetect,
+              ),
+            ),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withValues(alpha: 0.50),
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.55),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 20,
+              right: 20,
+              top: 20,
+              child: Row(
+                children: [
+                  IconButton.filledTonal(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      '扫描电脑端二维码',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Center(
+              child: Container(
+                width: 260,
+                height: 260,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.90),
+                    width: 3,
+                  ),
+                ),
+              ),
+            ),
+            const Positioned(
+              left: 24,
+              right: 24,
+              bottom: 42,
+              child: Text(
+                '将电脑端二维码放入框内，识别后会自动连接。',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],

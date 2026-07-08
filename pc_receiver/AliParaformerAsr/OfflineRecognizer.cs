@@ -77,14 +77,14 @@ namespace AliParaformerAsr
             switch (offlineYamlEntity.model.ToLower())
             {
                 case "paraformer":
+                case "contextualparaformer":
                     _offlineProj = new OfflineProjOfParaformer(_offlineModel);
                     break;
                 case "sensevoicesmall":
                     _offlineProj = new OfflineProjOfSenseVoiceSmall(_offlineModel);
                     break;
                 default:
-                    _offlineProj = null;
-                    break;
+                    throw new NotSupportedException($"Unsupported offline model type: {offlineYamlEntity.model}");
             }
             _wavFrontend = new WavFrontend(mvnFilePath, offlineYamlEntity.frontend_conf);
             _frontend = offlineYamlEntity.frontend;
@@ -121,38 +121,29 @@ namespace AliParaformerAsr
         private OfflineOutputEntity Forward(List<OfflineInputEntity> modelInputs)
         {
             OfflineOutputEntity offlineOutputEntity = new OfflineOutputEntity();            
-            try
+            ModelOutputEntity modelOutputEntity = _offlineProj.ModelProj(modelInputs);
+            if (modelOutputEntity != null)
             {
-                ModelOutputEntity modelOutputEntity = _offlineProj.ModelProj(modelInputs);
-                if (modelOutputEntity != null)
-                {
-                    offlineOutputEntity.Token_nums_length = modelOutputEntity.model_out_lens.AsEnumerable<int>().ToArray();
-                    Tensor<float> logits_tensor = modelOutputEntity.model_out;
-                    List<int[]> token_nums = new List<int[]> { };
+                offlineOutputEntity.Token_nums_length = modelOutputEntity.model_out_lens.AsEnumerable<int>().ToArray();
+                Tensor<float> logits_tensor = modelOutputEntity.model_out;
+                List<int[]> token_nums = new List<int[]> { };
 
-                    for (int i = 0; i < logits_tensor.Dimensions[0]; i++)
+                for (int i = 0; i < logits_tensor.Dimensions[0]; i++)
+                {
+                    int[] item = new int[logits_tensor.Dimensions[1]];
+                    for (int j = 0; j < logits_tensor.Dimensions[1]; j++)
                     {
-                        int[] item = new int[logits_tensor.Dimensions[1]];
-                        for (int j = 0; j < logits_tensor.Dimensions[1]; j++)
+                        int token_num = 0;
+                        for (int k = 1; k < logits_tensor.Dimensions[2]; k++)
                         {
-                            int token_num = 0;
-                            for (int k = 1; k < logits_tensor.Dimensions[2]; k++)
-                            {
-                                token_num = logits_tensor[i, j, token_num] > logits_tensor[i, j, k] ? token_num : k;
-                            }
-                            item[j] = (int)token_num;
+                            token_num = logits_tensor[i, j, token_num] > logits_tensor[i, j, k] ? token_num : k;
                         }
-                        token_nums.Add(item);
+                        item[j] = (int)token_num;
                     }
-                    offlineOutputEntity.Token_nums = token_nums;
+                    token_nums.Add(item);
                 }
+                offlineOutputEntity.Token_nums = token_nums;
             }
-            catch (Exception ex)
-            {
-                //
-            }
-            
-            
             return offlineOutputEntity;
         }
 

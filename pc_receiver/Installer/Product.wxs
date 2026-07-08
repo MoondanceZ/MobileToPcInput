@@ -9,7 +9,9 @@
     Scope="perMachine"
     Codepage="65001">
 
-    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 MobileToPcInput。" />
+    <MajorUpgrade
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="已安装更新版本的 MobileToPcInput。" />
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="AppIcon.ico" SourceFile="$(var.ProjectDir)\Assets\app.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />

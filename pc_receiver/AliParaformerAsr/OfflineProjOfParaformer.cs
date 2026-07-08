@@ -61,27 +61,37 @@ namespace AliParaformerAsr
                     var tensor = new DenseTensor<int>(speech_lengths, dim, false);
                     container.Add(NamedOnnxValue.CreateFromTensor<int>(name, tensor));
                 }
-            }
-            ModelOutputEntity modelOutputEntity = new ModelOutputEntity();
-            try
-            {
-                IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _modelSession.Run(container);
-
-                if (results != null)
+                if (name == "bias_embed")
                 {
-                    var resultsArray = results.ToArray();
-                    modelOutputEntity.model_out = resultsArray[0].AsTensor<float>();
-                    modelOutputEntity.model_out_lens = resultsArray[1].AsEnumerable<int>().ToArray();
-                    if (resultsArray.Length >= 4)
-                    {
-                        Tensor<float> cif_peak_tensor = resultsArray[3].AsTensor<float>();
-                        modelOutputEntity.cif_peak_tensor = cif_peak_tensor;
-                    }
+                    var meta = inputMeta[name];
+                    var embeddingSize = meta.Dimensions.Length > 2 && meta.Dimensions[2] > 0
+                        ? meta.Dimensions[2]
+                        : 512;
+                    var tensor = new DenseTensor<float>(
+                        new float[batchSize * embeddingSize],
+                        new[] { batchSize, 1, embeddingSize },
+                        false);
+                    container.Add(NamedOnnxValue.CreateFromTensor<float>(name, tensor));
                 }
             }
-            catch (Exception ex)
+
+            var missingInputs = inputMeta.Keys
+                .Where(name => container.All(input => input.Name != name))
+                .ToArray();
+            if (missingInputs.Length > 0)
             {
-                //
+                throw new NotSupportedException($"Unsupported Paraformer ONNX input(s): {string.Join(", ", missingInputs)}");
+            }
+            ModelOutputEntity modelOutputEntity = new ModelOutputEntity();
+            using IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results = _modelSession.Run(container);
+
+            var resultsArray = results.ToArray();
+            modelOutputEntity.model_out = resultsArray[0].AsTensor<float>();
+            modelOutputEntity.model_out_lens = resultsArray[1].AsEnumerable<int>().ToArray();
+            if (resultsArray.Length >= 4)
+            {
+                Tensor<float> cif_peak_tensor = resultsArray[3].AsTensor<float>();
+                modelOutputEntity.cif_peak_tensor = cif_peak_tensor;
             }
             return modelOutputEntity;
         }

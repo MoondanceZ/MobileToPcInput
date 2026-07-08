@@ -84,8 +84,8 @@ public partial class ModelManagerWindow : Window
         var isSharedReady = model.IsPunctuationDownloaded && model.IsVadDownloaded;
         var isReady = model.IsDownloaded && isSharedReady;
         var accent = model.IsSupported && (model.IsDownloaded || isLoaded) ? "#1769E0" : "#A0AEC0";
-        var background = isLoaded ? "#EEF6FF" : "White";
-        var border = isLoaded ? "#83B6FF" : "#DDE6F1";
+        var background = isLoaded ? "#EAF3FF" : "White";
+        var border = isLoaded ? "#6FA8FF" : "#DDE6F1";
 
         var title = new TextBlock
         {
@@ -147,7 +147,14 @@ public partial class ModelManagerWindow : Window
             MinHeight = 78,
             VerticalAlignment = VerticalAlignment.Stretch
         };
-        grid.Children.Add(new Border
+        var selectionMark = new Grid
+        {
+            Width = 18,
+            Height = 18,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        selectionMark.Children.Add(new Border
         {
             Width = 18,
             Height = 18,
@@ -157,6 +164,20 @@ public partial class ModelManagerWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center
         });
+        if (isLoaded)
+        {
+            selectionMark.Children.Add(new Border
+            {
+                Width = 8,
+                Height = 8,
+                CornerRadius = new CornerRadius(4),
+                Background = Brush("#1769E0"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+        }
+
+        grid.Children.Add(selectionMark);
 
         var text = new StackPanel
         {
@@ -177,7 +198,7 @@ public partial class ModelManagerWindow : Window
             Padding = new Thickness(16, 14),
             Background = Brush(background),
             BorderBrush = Brush(border),
-            BorderThickness = new Thickness(1),
+            BorderThickness = new Thickness(isLoaded ? 1.5 : 1),
             Child = grid
         };
     }
