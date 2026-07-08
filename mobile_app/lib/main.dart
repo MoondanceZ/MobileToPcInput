@@ -59,6 +59,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _isStoppingRecording = false;
   bool _isHandlingSocketClosed = false;
   bool _isAsrSessionActive = false;
+  bool _isKeepScreenOn = false;
   double _level = 0;
   String _status = '未连接';
 
@@ -147,6 +148,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       _manualDisconnect = false;
       _status = '正在连接...';
     });
+    _syncKeepScreenOn();
 
     try {
       final socket = await Socket.connect(
@@ -172,11 +174,13 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         _isConnected = true;
         _status = '已连接';
       });
+      _syncKeepScreenOn();
     } catch (ex) {
       _setStatus('连接失败: $ex');
     } finally {
       if (mounted) {
         setState(() => _isConnecting = false);
+        _syncKeepScreenOn();
       }
     }
   }
@@ -197,6 +201,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       _status = '未连接';
       _level = 0;
     });
+    _syncKeepScreenOn();
   }
 
   Future<void> _startRecording() async {
@@ -256,6 +261,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
 
     setState(() => _isReconnecting = true);
+    _syncKeepScreenOn();
     for (var attempt = 1; mounted && !_manualDisconnect; attempt++) {
       final waitMs = min(5000, 500 * attempt);
       await Future<void>.delayed(Duration(milliseconds: waitMs));
@@ -271,6 +277,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
     if (mounted) {
       setState(() => _isReconnecting = false);
+      _syncKeepScreenOn();
     } else {
       _isReconnecting = false;
     }
@@ -288,6 +295,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       _isConnected = false;
       _status = status;
     });
+    _syncKeepScreenOn();
     if (!_manualDisconnect) {
       unawaited(_reconnect());
     }
@@ -386,6 +394,20 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
   }
 
+  void _syncKeepScreenOn() {
+    final shouldKeepScreenOn = _isConnecting || _isConnected || _isReconnecting;
+    if (_isKeepScreenOn == shouldKeepScreenOn) {
+      return;
+    }
+
+    _isKeepScreenOn = shouldKeepScreenOn;
+    unawaited(
+      _deepLinkChannel
+          .invokeMethod<void>('setKeepScreenOn', shouldKeepScreenOn)
+          .catchError((Object _) {}),
+    );
+  }
+
   Future<void> _openQrScanner() async {
     final code = await Navigator.of(
       context,
@@ -404,6 +426,13 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
   @override
   void dispose() {
+    if (_isKeepScreenOn) {
+      unawaited(
+        _deepLinkChannel
+            .invokeMethod<void>('setKeepScreenOn', false)
+            .catchError((Object _) {}),
+      );
+    }
     _audioSubscription?.cancel();
     _socketSubscription?.cancel();
     _recorder.dispose();
