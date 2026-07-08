@@ -113,12 +113,11 @@ namespace AliParaformerAsr
                 if (results != null)
                 {
                     var resultsArray = results.ToArray();
-                    modelOutputEntity.model_out = resultsArray[0].AsTensor<float>();
+                    modelOutputEntity.model_out = CopyTensor(resultsArray[0].AsTensor<float>());
                     modelOutputEntity.model_out_lens = resultsArray[1].AsEnumerable<int>().ToArray();
                     if (resultsArray.Length >= 4)
                     {
-                        Tensor<float> cif_peak_tensor = resultsArray[3].AsTensor<float>();
-                        modelOutputEntity.cif_peak_tensor = cif_peak_tensor;
+                        modelOutputEntity.cif_peak_tensor = CopyTensor(resultsArray[3].AsTensor<float>());
                     }
                 }
             }
@@ -128,6 +127,12 @@ namespace AliParaformerAsr
             }
             return modelOutputEntity;
         }
+
+        private static DenseTensor<float> CopyTensor(Tensor<float> tensor)
+        {
+            return new DenseTensor<float>(tensor.ToArray(), tensor.Dimensions.ToArray(), false);
+        }
+
         protected virtual void Dispose(bool disposing)
         {
             if (!_disposed)
