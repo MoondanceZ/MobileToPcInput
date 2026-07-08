@@ -176,7 +176,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       });
       _syncKeepScreenOn();
     } catch (ex) {
-      _setStatus('连接失败: $ex');
+      debugPrint('Connect failed: $ex');
+      _setStatus('连接失败');
     } finally {
       if (mounted) {
         setState(() => _isConnecting = false);
@@ -869,6 +870,9 @@ class _StatusPanel extends StatelessWidget {
         ? '已连接'
         : status;
     final isBusy = isConnecting || isReconnecting;
+    final statusDescription = isConnected || isReconnecting
+        ? '保持手机和电脑在同一个 WiFi 下'
+        : '扫描或输入电脑端显示的 IP 和端口';
 
     return _SoftCard(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
@@ -887,6 +891,8 @@ class _StatusPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   statusTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Color(0xff10213b),
                     fontSize: 22,
@@ -904,20 +910,18 @@ class _StatusPanel extends StatelessWidget {
               ],
             ],
           ),
-          if (!isBusy) ...[
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.only(left: 40),
-              child: Text(
-                isConnected ? '保持手机和电脑在同一个 WiFi 下' : '扫描或输入电脑端显示的 IP 和端口',
-                style: const TextStyle(
-                  color: Color(0xff718096),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.only(left: 40),
+            child: Text(
+              statusDescription,
+              style: const TextStyle(
+                color: Color(0xff718096),
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
               ),
             ),
-          ],
+          ),
           const SizedBox(height: 22),
           ClipRRect(
             borderRadius: BorderRadius.circular(999),
