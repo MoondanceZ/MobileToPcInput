@@ -91,6 +91,7 @@ public sealed class ParaformerAsrService : IDisposable
                 var results = recognizer.GetResults([samples]);
                 var text = results.FirstOrDefault()?.Trim() ?? string.Empty;
                 text = RestorePunctuation(text);
+                text = ReplaceTrailingFullStopWithSpace(text);
                 AppLogger.Info($"C# ASR result. textLength={text.Length}");
                 return text;
             }, cancellationToken);
@@ -168,6 +169,25 @@ public sealed class ParaformerAsrService : IDisposable
             AppLogger.Error("Punctuation restoration failed", ex);
             return text;
         }
+    }
+
+    private static string ReplaceTrailingFullStopWithSpace(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        var trimmedEnd = text.TrimEnd();
+        if (trimmedEnd.Length == 0)
+        {
+            return text;
+        }
+
+        var last = trimmedEnd[^1];
+        return last is '。' or '.' or '．'
+            ? trimmedEnd[..^1] + " "
+            : text;
     }
 
     private static string FindRequiredFile(string directory, params string[] fileNames)

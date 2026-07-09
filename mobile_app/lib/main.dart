@@ -10,9 +10,20 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+const _appBackgroundColor = Color(0xffeef6ff);
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: _appBackgroundColor,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+      systemNavigationBarColor: _appBackgroundColor,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ),
+  );
   runApp(const MobileToPcInputApp());
 }
 
@@ -449,7 +460,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     final canTalk = _isConnected && !isConnectionBusy;
 
     return Scaffold(
-      backgroundColor: const Color(0xffeef6ff),
+      backgroundColor: _appBackgroundColor,
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 46, 20, 28),
