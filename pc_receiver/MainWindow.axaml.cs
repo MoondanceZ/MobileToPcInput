@@ -318,7 +318,7 @@ public partial class MainWindow : Window
                 message: "正在加载模型...",
                 progress: 72,
                 isIndeterminate: false);
-            await WarmUpAsrAsync(model);
+            await WarmUpAsrAsync(model, startListeningWhenReady: true);
             SaveSelectedModelSetting(model);
             SetModelOperation(
                 isRunning: false,
@@ -534,7 +534,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            await WarmUpAsrAsync(model);
+            await WarmUpAsrAsync(model, startListeningWhenReady: true);
             SaveSelectedModelSetting(model);
         }
         finally
@@ -736,7 +736,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task WarmUpAsrAsync(AsrModelOption? model = null)
+    private async Task WarmUpAsrAsync(AsrModelOption? model = null, bool startListeningWhenReady = false)
     {
         try
         {
@@ -754,7 +754,7 @@ public partial class MainWindow : Window
             await _asrService.WarmUpAsync();
             _isAsrReady = true;
             AppLogger.Info($"ASR warm-up completed. model={model.Id}");
-            Dispatcher.UIThread.Post(() =>
+            var shouldStartListening = await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 StartButton.IsEnabled = !StopButton.IsEnabled;
                 ManageModelButton.IsEnabled = true;
@@ -767,7 +767,13 @@ public partial class MainWindow : Window
                 {
                     StatusText.Text = "模型已就绪";
                 }
+                return startListeningWhenReady && !StopButton.IsEnabled;
             });
+
+            if (shouldStartListening)
+            {
+                await StartListeningAsync();
+            }
         }
         catch (Exception ex)
         {
@@ -794,11 +800,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await WarmUpAsrAsync(model);
-        if (_isAsrReady && !StopButton.IsEnabled)
-        {
-            await StartListeningAsync();
-        }
+        await WarmUpAsrAsync(model, startListeningWhenReady: true);
     }
 
     private static bool IsStartControl(string? type)

@@ -48,7 +48,9 @@ namespace AliParaformerAsr
                     break;
             }
             //options.LogSeverityLevel = OrtLoggingLevel.ORT_LOGGING_LEVEL_INFO;
+            options.ExecutionMode = ExecutionMode.ORT_SEQUENTIAL;
             options.InterOpNumThreads = threadsNum;
+            options.IntraOpNumThreads = threadsNum;
             InferenceSession onnxSession = new InferenceSession(modelFilePath, options);
             return onnxSession;
         }

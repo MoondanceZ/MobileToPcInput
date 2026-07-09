@@ -41,6 +41,7 @@ public sealed class PunctuationRestorer : IDisposable
 
         var options = new SessionOptions
         {
+            ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
             InterOpNumThreads = threads,
             IntraOpNumThreads = threads
         };
@@ -99,18 +100,32 @@ public sealed class PunctuationRestorer : IDisposable
 
     private string ApplyPunctuation(string[] chars, Tensor<float> logits)
     {
+        if (logits.Dimensions.Length != 3 || logits.Dimensions[2] <= 1)
+        {
+            return string.Concat(chars);
+        }
+
         var result = new List<string>(chars.Length * 2);
         var labelCount = Math.Min(logits.Dimensions[2], _punctuationLabels.Length);
+        var scores = logits.ToArray();
+        var timeSteps = logits.Dimensions[1];
+        var outputLabelCount = logits.Dimensions[2];
         for (var i = 0; i < chars.Length; i++)
         {
+            if (i >= timeSteps)
+            {
+                break;
+            }
+
             result.Add(chars[i]);
             var labelIndex = 1;
-            var maxScore = logits[0, i, labelIndex];
+            var frameOffset = i * outputLabelCount;
+            var maxScore = scores[frameOffset + labelIndex];
             for (var label = 0; label < labelCount; label++)
             {
-                if (logits[0, i, label] > maxScore)
+                if (scores[frameOffset + label] > maxScore)
                 {
-                    maxScore = logits[0, i, label];
+                    maxScore = scores[frameOffset + label];
                     labelIndex = label;
                 }
             }

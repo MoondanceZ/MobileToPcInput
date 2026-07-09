@@ -98,7 +98,7 @@ namespace AliParaformerAsr
             _logger.LogInformation("get features begin");
             List<OfflineInputEntity> offlineInputEntities = ExtractFeats(samples);
             OfflineOutputEntity modelOutput = Forward(offlineInputEntities);
-            List<string> text_results = DecodeMulti(modelOutput.Token_nums);
+            List<string> text_results = DecodeMulti(modelOutput.Token_nums ?? new List<int[]>());
             return text_results;
         }
 
@@ -121,22 +121,50 @@ namespace AliParaformerAsr
         private OfflineOutputEntity Forward(List<OfflineInputEntity> modelInputs)
         {
             OfflineOutputEntity offlineOutputEntity = new OfflineOutputEntity();            
-            ModelOutputEntity modelOutputEntity = _offlineProj.ModelProj(modelInputs);
-            if (modelOutputEntity != null)
+            if (_offlineProj is null)
             {
-                offlineOutputEntity.Token_nums_length = modelOutputEntity.model_out_lens.AsEnumerable<int>().ToArray();
-                Tensor<float> logits_tensor = modelOutputEntity.model_out;
+                throw new InvalidOperationException("Offline model projection is not initialized.");
+            }
+
+            ModelOutputEntity modelOutputEntity = _offlineProj.ModelProj(modelInputs);
+            if (modelOutputEntity?.model_out is not null)
+            {
+                offlineOutputEntity.Token_nums_length = modelOutputEntity.model_out_lens ?? Array.Empty<int>();
+                Tensor<float> logitsTensor = modelOutputEntity.model_out;
+                var dimensions = logitsTensor.Dimensions;
+                if (dimensions.Length != 3)
+                {
+                    throw new InvalidOperationException($"Unexpected ASR output rank: {dimensions.Length}.");
+                }
+
+                int batchSize = dimensions[0];
+                int frameCount = dimensions[1];
+                int vocabSize = dimensions[2];
+                if (batchSize <= 0 || frameCount <= 0 || vocabSize <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Unexpected ASR output shape: [{string.Join(", ", dimensions.ToArray())}].");
+                }
+
+                float[] logits = logitsTensor.ToArray();
                 List<int[]> token_nums = new List<int[]> { };
 
-                for (int i = 0; i < logits_tensor.Dimensions[0]; i++)
+                for (int i = 0; i < batchSize; i++)
                 {
-                    int[] item = new int[logits_tensor.Dimensions[1]];
-                    for (int j = 0; j < logits_tensor.Dimensions[1]; j++)
+                    int validFrames = frameCount;
+                    if (i < offlineOutputEntity.Token_nums_length.Length)
+                    {
+                        validFrames = Math.Clamp(offlineOutputEntity.Token_nums_length[i], 0, frameCount);
+                    }
+
+                    int[] item = new int[validFrames];
+                    for (int j = 0; j < validFrames; j++)
                     {
                         int token_num = 0;
-                        for (int k = 1; k < logits_tensor.Dimensions[2]; k++)
+                        int frameOffset = ((i * frameCount) + j) * vocabSize;
+                        for (int k = 1; k < vocabSize; k++)
                         {
-                            token_num = logits_tensor[i, j, token_num] > logits_tensor[i, j, k] ? token_num : k;
+                            token_num = logits[frameOffset + token_num] > logits[frameOffset + k] ? token_num : k;
                         }
                         item[j] = (int)token_num;
                     }
@@ -150,7 +178,6 @@ namespace AliParaformerAsr
         private List<string> DecodeMulti(List<int[]> token_nums)
         {
             List<string> text_results = new List<string>();
-#pragma warning disable CS8602 // 解引用可能出现空引用。
             foreach (int[] token_num in token_nums)
             {
                 string text_result = "";
@@ -159,6 +186,11 @@ namespace AliParaformerAsr
                     if (token == 2)
                     {
                         break;
+                    }
+
+                    if ((uint)token >= (uint)_tokens.Length)
+                    {
+                        continue;
                     }
 
                     string tokenChar = _tokens[token].Split("\t")[0];
@@ -177,7 +209,6 @@ namespace AliParaformerAsr
                 }
                 text_results.Add(text_result.Replace("@@▁▁", "").Replace("▁▁", " ").Replace("▁", ""));
             }
-#pragma warning restore CS8602 // 解引用可能出现空引用。
 
             return text_results;
         }

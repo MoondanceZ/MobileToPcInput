@@ -11,6 +11,10 @@ namespace pc_receiver;
 
 public sealed class ParaformerAsrService : IDisposable
 {
+    private const int RecognitionSampleRate = 16000;
+    private const int MaxRecognitionChunkSeconds = 8;
+    private const int MaxRecognitionChunkSamples = RecognitionSampleRate * MaxRecognitionChunkSeconds;
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly PunctuationRestorer _punctuationRestorer = new();
     private OfflineRecognizer? _recognizer;
@@ -88,8 +92,23 @@ public sealed class ParaformerAsrService : IDisposable
                 WorkerStatusChanged?.Invoke("C# ONNX recognition starting");
                 AppLogger.Info($"C# ASR request starting. model={_model.Id}, wav={wavPath}");
                 var samples = LoadWavSamples(wavPath);
-                var results = recognizer.GetResults([samples]);
-                var text = results.FirstOrDefault()?.Trim() ?? string.Empty;
+                var chunks = SplitSamples(samples).ToArray();
+                AppLogger.Info($"C# ASR samples loaded. samples={samples.Length}, chunks={chunks.Length}");
+
+                var textParts = new List<string>(chunks.Length);
+                for (var i = 0; i < chunks.Length; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    AppLogger.Info($"C# ASR chunk starting. index={i + 1}, total={chunks.Length}, samples={chunks[i].Length}");
+                    var results = recognizer.GetResults([chunks[i]]);
+                    var chunkText = results.FirstOrDefault()?.Trim();
+                    if (!string.IsNullOrWhiteSpace(chunkText))
+                    {
+                        textParts.Add(chunkText);
+                    }
+                }
+
+                var text = string.Concat(textParts);
                 text = RestorePunctuation(text);
                 text = ReplaceTrailingFullStopWithSpace(text);
                 AppLogger.Info($"C# ASR result. textLength={text.Length}");
@@ -114,7 +133,7 @@ public sealed class ParaformerAsrService : IDisposable
         var configFilePath = FindRequiredFile(modelDirectory, "asr.yaml", "config.yaml");
         var mvnFilePath = FindRequiredFile(modelDirectory, "am.mvn");
         var tokensFilePath = FindRequiredFile(modelDirectory, "tokens.json", "tokens.txt");
-        var threads = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+        var threads = 1;
 
         WorkerStatusChanged?.Invoke("loading C# ONNX model");
         AppLogger.Info(
@@ -145,7 +164,7 @@ public sealed class ParaformerAsrService : IDisposable
         }
 
         var modelDirectory = AsrModelCatalog.GetModelCacheDirectory(_model.PunctuationModel);
-        var threads = Math.Clamp(Environment.ProcessorCount / 2, 1, 8);
+        var threads = 1;
         WorkerStatusChanged?.Invoke("loading punctuation model");
         AppLogger.Info($"Punctuation model loading. model={_model.PunctuationModel}, directory={modelDirectory}, threads={threads}");
         _punctuationRestorer.Load(modelDirectory, threads, cancellationToken);
@@ -224,6 +243,23 @@ public sealed class ParaformerAsrService : IDisposable
         }
 
         return samples.ToArray();
+    }
+
+    private static IEnumerable<float[]> SplitSamples(float[] samples)
+    {
+        if (samples.Length == 0)
+        {
+            yield return samples;
+            yield break;
+        }
+
+        for (var offset = 0; offset < samples.Length; offset += MaxRecognitionChunkSamples)
+        {
+            var length = Math.Min(MaxRecognitionChunkSamples, samples.Length - offset);
+            var chunk = new float[length];
+            Array.Copy(samples, offset, chunk, 0, length);
+            yield return chunk;
+        }
     }
 
     private void DisposeRecognizer()

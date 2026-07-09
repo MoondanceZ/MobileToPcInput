@@ -66,11 +66,14 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _isConnected = false;
   bool _manualDisconnect = false;
   bool _isReconnecting = false;
+  bool _isStartingRecording = false;
   bool _isRecording = false;
   bool _isStoppingRecording = false;
   bool _isHandlingSocketClosed = false;
   bool _isAsrSessionActive = false;
   bool _isKeepScreenOn = false;
+  bool _isTalkPressed = false;
+  int? _activeTalkPointer;
   double _level = 0;
   String _status = '未连接';
 
@@ -217,21 +220,35 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   }
 
   Future<void> _startRecording() async {
-    if (!_isConnected || _socket == null || _isRecording) {
+    if (!_isConnected ||
+        _socket == null ||
+        _isRecording ||
+        _isStartingRecording) {
       return;
     }
 
-    unawaited(HapticFeedback.mediumImpact());
-    if (!await _recorder.hasPermission()) {
-      _setStatus('没有麦克风权限');
-      return;
-    }
+    _isStartingRecording = true;
 
     try {
+      unawaited(HapticFeedback.mediumImpact());
+      if (!await _recorder.hasPermission()) {
+        _setStatus('没有麦克风权限');
+        return;
+      }
+
+      if (!_isTalkPressed) {
+        return;
+      }
+
       if (_sendControlMessage('asr-start')) {
         _isAsrSessionActive = true;
       }
       await Future<void>.delayed(const Duration(milliseconds: 120));
+
+      if (!_isTalkPressed) {
+        return;
+      }
+
       final stream = await _recorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
@@ -258,12 +275,23 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         cancelOnError: true,
       );
 
+      if (!_isTalkPressed) {
+        await _stopRecording();
+        return;
+      }
+
       setState(() {
         _isRecording = true;
         _status = '正在发送语音';
       });
     } catch (ex) {
       _setStatus('启动录音失败: $ex');
+      if (_isAsrSessionActive) {
+        _sendControlMessage('asr-stop');
+        _isAsrSessionActive = false;
+      }
+    } finally {
+      _isStartingRecording = false;
     }
   }
 
@@ -349,6 +377,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
 
     _isStoppingRecording = true;
+    _activeTalkPointer = null;
+    _isTalkPressed = false;
     unawaited(HapticFeedback.lightImpact());
 
     if (!_isRecording && _audioSubscription == null && !_isAsrSessionActive) {
@@ -381,6 +411,29 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     } finally {
       _isStoppingRecording = false;
     }
+  }
+
+  void _handleTalkPointerDown(PointerDownEvent event) {
+    if (!_isConnected ||
+        _isConnecting ||
+        _isReconnecting ||
+        _activeTalkPointer != null) {
+      return;
+    }
+
+    _activeTalkPointer = event.pointer;
+    setState(() => _isTalkPressed = true);
+    unawaited(_startRecording());
+  }
+
+  void _handleTalkPointerEnd(PointerEvent event) {
+    if (_activeTalkPointer != event.pointer) {
+      return;
+    }
+
+    _activeTalkPointer = null;
+    setState(() => _isTalkPressed = false);
+    unawaited(_stopRecording());
   }
 
   double _calculateLevel(Uint8List bytes) {
@@ -462,169 +515,214 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     return Scaffold(
       backgroundColor: _appBackgroundColor,
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 46, 20, 28),
-          children: [
-            _SoftCard(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isCompact = constraints.maxHeight < 720;
+            final isVeryCompact = constraints.maxHeight < 620;
+            final verticalPadding = isVeryCompact
+                ? 10.0
+                : isCompact
+                ? 22.0
+                : 46.0;
+            final buttonSize = isVeryCompact
+                ? 132.0
+                : isCompact
+                ? 168.0
+                : 188.0;
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, verticalPadding, 20, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '电脑接收器',
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(
-                                color: const Color(0xff10213b),
-                                fontWeight: FontWeight.w900,
-                              ),
-                        ),
-                      ),
-                      FilledButton.icon(
-                        onPressed: isConnectionBusy ? null : _openQrScanner,
-                        icon: const Icon(Icons.qr_code_scanner, size: 22),
-                        label: const Text('扫码'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xffe3e8ff),
-                          disabledBackgroundColor: const Color(0xffe4e4e4),
-                          foregroundColor: const Color(0xff10213b),
-                          disabledForegroundColor: const Color(0xff9a9a9a),
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 13,
-                          ),
-                          textStyle: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
+                  _buildReceiverCard(
+                    context,
+                    isConnectionBusy,
+                    isCompact: isVeryCompact,
                   ),
-                  const SizedBox(height: 22),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Expanded(
-                        flex: 9,
-                        child: _SoftTextField(
-                          controller: _hostController,
-                          enabled: !_isConnected && !isConnectionBusy,
-                          labelText: '电脑 IP',
-                          hintText: '例如 192.168.1.20',
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 5,
-                        child: _SoftTextField(
-                          controller: _portController,
-                          enabled: !_isConnected && !isConnectionBusy,
-                          labelText: '端口',
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
                   SizedBox(
-                    height: 58,
-                    child: FilledButton.icon(
-                      onPressed: isConnectionBusy
-                          ? null
-                          : _isConnected
-                          ? _disconnect
-                          : _connect,
-                      icon: Icon(_isConnected ? Icons.link_off : Icons.wifi),
-                      label: Text(_isConnected ? '断开连接' : '连接电脑'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xff536ba8),
-                        disabledBackgroundColor: const Color(0xffb9c4d6),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(28),
-                        ),
-                        textStyle: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    height: isVeryCompact
+                        ? 10
+                        : isCompact
+                        ? 16
+                        : 22,
+                  ),
+                  _StatusPanel(
+                    status: _status,
+                    isConnected: _isConnected,
+                    isConnecting: _isConnecting,
+                    isReconnecting: _isReconnecting,
+                    isRecording: _isRecording,
+                    level: _level,
+                    onRetry: _connect,
+                  ),
+                  const Spacer(),
+                  _buildTalkButton(canTalk: canTalk, size: buttonSize),
+                  const Spacer(),
+                  if (!isVeryCompact)
+                    Text(
+                      _isConnected ? '正在使用电脑语音输入' : '连接电脑后启用语音输入',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xff718096),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                  ),
                 ],
               ),
-            ),
-            const SizedBox(height: 22),
-            _StatusPanel(
-              status: _status,
-              isConnected: _isConnected,
-              isConnecting: _isConnecting,
-              isReconnecting: _isReconnecting,
-              isRecording: _isRecording,
-              level: _level,
-              onRetry: _connect,
-            ),
-            const SizedBox(height: 66),
-            GestureDetector(
-              onTapDown: canTalk ? (_) => _startRecording() : null,
-              onTapUp: canTalk ? (_) => _stopRecording() : null,
-              onTapCancel: canTalk ? _stopRecording : null,
-              child: Center(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  width: 188,
-                  height: 188,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _isRecording
-                        ? const Color(0xffe66b6b)
-                        : canTalk
-                        ? const Color(0xff536ba8)
-                        : const Color(0xffcbd5e6),
-                    boxShadow: [
-                      BoxShadow(
-                        color:
-                            (_isRecording
-                                    ? const Color(0xffe66b6b)
-                                    : const Color(0xff9fb0ca))
-                                .withValues(alpha: 0.22),
-                        blurRadius: 30,
-                        offset: const Offset(0, 16),
-                      ),
-                    ],
-                  ),
-                  alignment: Alignment.center,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.mic, color: Colors.white, size: 48),
-                      const SizedBox(height: 10),
-                      Text(
-                        _isRecording ? '松开停止' : '按住说话',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReceiverCard(
+    BuildContext context,
+    bool isConnectionBusy, {
+    required bool isCompact,
+  }) {
+    return _SoftCard(
+      padding: isCompact
+          ? const EdgeInsets.fromLTRB(16, 14, 16, 14)
+          : const EdgeInsets.fromLTRB(20, 20, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '电脑接收器',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    color: const Color(0xff10213b),
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 34),
-            Text(
-              _isConnected ? '正在使用电脑语音输入' : '连接电脑后启用语音输入',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xff718096),
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+              FilledButton.icon(
+                onPressed: isConnectionBusy ? null : _openQrScanner,
+                icon: const Icon(Icons.qr_code_scanner, size: 22),
+                label: const Text('扫码'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xffe3e8ff),
+                  disabledBackgroundColor: const Color(0xffe4e4e4),
+                  foregroundColor: const Color(0xff10213b),
+                  disabledForegroundColor: const Color(0xff9a9a9a),
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 13,
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: isCompact ? 14 : 22),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                flex: 9,
+                child: _SoftTextField(
+                  controller: _hostController,
+                  enabled: !_isConnected && !isConnectionBusy,
+                  labelText: '电脑 IP',
+                  hintText: '例如 192.168.1.20',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 5,
+                child: _SoftTextField(
+                  controller: _portController,
+                  enabled: !_isConnected && !isConnectionBusy,
+                  labelText: '端口',
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: isCompact ? 12 : 18),
+          SizedBox(
+            height: isCompact ? 50 : 58,
+            child: FilledButton.icon(
+              onPressed: isConnectionBusy
+                  ? null
+                  : _isConnected
+                  ? _disconnect
+                  : _connect,
+              icon: Icon(_isConnected ? Icons.link_off : Icons.wifi),
+              label: Text(_isConnected ? '断开连接' : '连接电脑'),
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xff536ba8),
+                disabledBackgroundColor: const Color(0xffb9c4d6),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTalkButton({required bool canTalk, required double size}) {
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: canTalk ? _handleTalkPointerDown : null,
+      onPointerUp: canTalk ? _handleTalkPointerEnd : null,
+      onPointerCancel: canTalk ? _handleTalkPointerEnd : null,
+      child: Center(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _isRecording
+                ? const Color(0xffe66b6b)
+                : canTalk
+                ? const Color(0xff536ba8)
+                : const Color(0xffcbd5e6),
+            boxShadow: [
+              BoxShadow(
+                color:
+                    (_isRecording
+                            ? const Color(0xffe66b6b)
+                            : const Color(0xff9fb0ca))
+                        .withValues(alpha: 0.22),
+                blurRadius: 30,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mic, color: Colors.white, size: 48),
+              const SizedBox(height: 10),
+              Text(
+                _isRecording ? '松开停止' : '按住说话',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
