@@ -27,6 +27,7 @@ public sealed class ParaformerAsrService : IDisposable
     public event Action<string>? WorkerStatusChanged;
 
     public AsrModelOption CurrentModel => _model;
+    public bool ReplaceTrailingFullStopWithSpaceEnabled { get; set; } = true;
 
     public async Task ConfigureModelAsync(AsrModelOption model, CancellationToken cancellationToken = default)
     {
@@ -106,7 +107,10 @@ public sealed class ParaformerAsrService : IDisposable
                     ? RecognizeWithSherpa(wavPath, cancellationToken)
                     : RecognizeWithNative(wavPath, EnsureRecognizer(), cancellationToken);
                 text = RestorePunctuation(text);
-                text = ReplaceTrailingFullStopWithSpace(text);
+                if (ReplaceTrailingFullStopWithSpaceEnabled)
+                {
+                    text = ReplaceTrailingFullStopWithSpace(text);
+                }
                 AppLogger.Info($"C# ASR result. textLength={text.Length}");
                 return text;
             }, cancellationToken);

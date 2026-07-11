@@ -63,9 +63,12 @@ public partial class MainWindow : Window
         PortBox.Text = IsValidPort(_settings.Port) ? _settings.Port.ToString() : "8765";
         var startupEnabled = _startupService.IsEnabled();
         StartupBox.IsChecked = startupEnabled;
+        ReplaceTrailingFullStopBox.IsChecked = _settings.ReplaceTrailingFullStopWithSpace;
+        _asrService.ReplaceTrailingFullStopWithSpaceEnabled = _settings.ReplaceTrailingFullStopWithSpace;
         _settings.StartupEnabled = startupEnabled;
         SaveSettings();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
+        ReplaceTrailingFullStopBox.Click += (_, _) => SetReplaceTrailingFullStopWithSpace(ReplaceTrailingFullStopBox.IsChecked == true);
         DeviceBox.SelectionChanged += async (_, _) => await ApplySelectedModelAsync();
         PortBox.TextChanged += (_, _) =>
         {
@@ -650,6 +653,14 @@ public partial class MainWindow : Window
             _settings.StartupEnabled = actual;
             SaveSettings();
         }
+    }
+
+    private void SetReplaceTrailingFullStopWithSpace(bool enabled)
+    {
+        ReplaceTrailingFullStopBox.IsChecked = enabled;
+        _asrService.ReplaceTrailingFullStopWithSpaceEnabled = enabled;
+        _settings.ReplaceTrailingFullStopWithSpace = enabled;
+        SaveSettings();
     }
 
     private void SyncListeningUi(bool isListening)
