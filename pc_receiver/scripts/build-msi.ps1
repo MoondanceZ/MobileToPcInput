@@ -70,7 +70,8 @@ $requiredFiles = @(
     "libHarfBuzzSharp.dll",
     "libSkiaSharp.dll",
     "onnxruntime.dll",
-    "onnxruntime_providers_shared.dll"
+    "onnxruntime_providers_shared.dll",
+    "sherpa-onnx-c-api.dll"
 )
 
 foreach ($file in $requiredFiles) {

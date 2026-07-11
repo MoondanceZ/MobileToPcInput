@@ -72,6 +72,10 @@
         <Component Id="KaldiNativeFbank" Guid="*">
           <File Source="$(var.PublishDir)\kaldi-native-fbank.dll" KeyPath="yes" />
         </Component>
+
+        <Component Id="SherpaOnnxNative" Guid="*">
+          <File Source="$(var.PublishDir)\sherpa-onnx-c-api.dll" KeyPath="yes" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -98,6 +102,7 @@
       <ComponentRef Id="OnnxRuntimeNative" />
       <ComponentRef Id="OnnxRuntimeProvidersShared" />
       <ComponentRef Id="KaldiNativeFbank" />
+      <ComponentRef Id="SherpaOnnxNative" />
       <ComponentRef Id="ApplicationProgramsFolderComponent" />
     </Feature>
   </Package>

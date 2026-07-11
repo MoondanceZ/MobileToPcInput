@@ -16,6 +16,7 @@ public sealed class ModelDownloadService
     private static readonly HttpClient HttpClient = CreateHttpClient();
 
     private static readonly string[] AsrFiles = ["config.yaml", "tokens.json", "am.mvn", "model_quant.onnx"];
+    private static readonly string[] SherpaParaformerFiles = ["tokens.txt", "model.int8.onnx"];
     private static readonly string[] PunctuationFiles = ["config.yaml", "tokens.json", "model_quant.onnx"];
     private static readonly string[] VadFiles = ["config.yaml", "am.mvn", "configuration.json", "model_quant.onnx"];
 
@@ -76,21 +77,31 @@ public sealed class ModelDownloadService
     {
         if (!model.IsDownloaded)
         {
-            yield return BuildPlan("语音识别模型", model.AsrModel, model.Revision, AsrFiles);
+            yield return BuildPlan(
+                "语音识别模型",
+                model.AsrModel,
+                model.Revision,
+                model.Provider,
+                model.Engine == AsrEngine.SherpaOnnxParaformer ? SherpaParaformerFiles : AsrFiles);
         }
 
-        if (!model.IsPunctuationDownloaded)
+        if (model.RequiresPunctuationModel && !model.IsPunctuationDownloaded)
         {
-            yield return BuildPlan("标点恢复模型", model.PunctuationModel, model.Revision, PunctuationFiles);
+            yield return BuildPlan("标点恢复模型", model.PunctuationModel, model.Revision, ModelProvider.ModelScope, PunctuationFiles);
         }
 
-        if (!model.IsVadDownloaded)
+        if (model.RequiresVadModel && !model.IsVadDownloaded)
         {
-            yield return BuildPlan("语音活动检测模型", model.VadModel, model.Revision, VadFiles);
+            yield return BuildPlan("语音活动检测模型", model.VadModel, model.Revision, ModelProvider.ModelScope, VadFiles);
         }
     }
 
-    private static ModelDownloadPlan BuildPlan(string displayName, string modelName, string revision, string[] fileNames)
+    private static ModelDownloadPlan BuildPlan(
+        string displayName,
+        string modelName,
+        string revision,
+        ModelProvider provider,
+        string[] fileNames)
     {
         var directory = AsrModelCatalog.GetModelCacheDirectory(modelName);
         return new ModelDownloadPlan(
@@ -99,12 +110,16 @@ public sealed class ModelDownloadService
             fileNames.Select(fileName => new ModelDownloadFile(
                 fileName,
                 Path.Combine(directory, fileName),
-                BuildDownloadUrl(modelName, revision, fileName))).ToArray());
+                BuildDownloadUrl(modelName, revision, provider, fileName))).ToArray());
     }
 
-    private static string BuildDownloadUrl(string modelName, string revision, string fileName)
+    private static string BuildDownloadUrl(string modelName, string revision, ModelProvider provider, string fileName)
     {
-        return $"https://www.modelscope.cn/api/v1/models/{modelName}/repo?Revision={Uri.EscapeDataString(revision)}&FilePath={Uri.EscapeDataString(fileName)}";
+        return provider switch
+        {
+            ModelProvider.HuggingFace => $"https://huggingface.co/{modelName}/resolve/{Uri.EscapeDataString(revision)}/{Uri.EscapeDataString(fileName)}?download=true",
+            _ => $"https://www.modelscope.cn/api/v1/models/{modelName}/repo?Revision={Uri.EscapeDataString(revision)}&FilePath={Uri.EscapeDataString(fileName)}"
+        };
     }
 
     private static HttpClient CreateHttpClient()

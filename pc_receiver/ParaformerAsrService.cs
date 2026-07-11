@@ -6,6 +6,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using AliParaformerAsr;
 using NAudio.Wave;
+using SherpaOnnx;
+using NativeOfflineRecognizer = AliParaformerAsr.OfflineRecognizer;
+using SherpaOfflineRecognizer = SherpaOnnx.OfflineRecognizer;
 
 namespace pc_receiver;
 
@@ -17,7 +20,8 @@ public sealed class ParaformerAsrService : IDisposable
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly PunctuationRestorer _punctuationRestorer = new();
-    private OfflineRecognizer? _recognizer;
+    private NativeOfflineRecognizer? _recognizer;
+    private SherpaOfflineRecognizer? _sherpaRecognizer;
     private AsrModelOption _model = AsrModelCatalog.DefaultModel;
 
     public event Action<string>? WorkerStatusChanged;
@@ -70,7 +74,15 @@ public sealed class ParaformerAsrService : IDisposable
             await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                EnsureRecognizer();
+                if (_model.Engine == AsrEngine.SherpaOnnxParaformer)
+                {
+                    EnsureSherpaRecognizer();
+                }
+                else
+                {
+                    EnsureRecognizer();
+                }
+
                 EnsurePunctuationRestorer(cancellationToken);
             }, cancellationToken);
         }
@@ -88,27 +100,11 @@ public sealed class ParaformerAsrService : IDisposable
             return await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var recognizer = EnsureRecognizer();
                 WorkerStatusChanged?.Invoke("C# ONNX recognition starting");
                 AppLogger.Info($"C# ASR request starting. model={_model.Id}, wav={wavPath}");
-                var samples = LoadWavSamples(wavPath);
-                var chunks = SplitSamples(samples).ToArray();
-                AppLogger.Info($"C# ASR samples loaded. samples={samples.Length}, chunks={chunks.Length}");
-
-                var textParts = new List<string>(chunks.Length);
-                for (var i = 0; i < chunks.Length; i++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    AppLogger.Info($"C# ASR chunk starting. index={i + 1}, total={chunks.Length}, samples={chunks[i].Length}");
-                    var results = recognizer.GetResults([chunks[i]]);
-                    var chunkText = results.FirstOrDefault()?.Trim();
-                    if (!string.IsNullOrWhiteSpace(chunkText))
-                    {
-                        textParts.Add(chunkText);
-                    }
-                }
-
-                var text = string.Concat(textParts);
+                var text = _model.Engine == AsrEngine.SherpaOnnxParaformer
+                    ? RecognizeWithSherpa(wavPath, cancellationToken)
+                    : RecognizeWithNative(wavPath, EnsureRecognizer(), cancellationToken);
                 text = RestorePunctuation(text);
                 text = ReplaceTrailingFullStopWithSpace(text);
                 AppLogger.Info($"C# ASR result. textLength={text.Length}");
@@ -121,11 +117,16 @@ public sealed class ParaformerAsrService : IDisposable
         }
     }
 
-    private OfflineRecognizer EnsureRecognizer()
+    private NativeOfflineRecognizer EnsureRecognizer()
     {
         if (_recognizer is not null)
         {
             return _recognizer;
+        }
+
+        if (_model.Engine == AsrEngine.SherpaOnnxParaformer)
+        {
+            throw new InvalidOperationException("Sherpa-ONNX recognizer should be loaded via EnsureSherpaRecognizer.");
         }
 
         var modelDirectory = AsrModelCatalog.GetModelCacheDirectory(_model.AsrModel);
@@ -138,7 +139,7 @@ public sealed class ParaformerAsrService : IDisposable
         WorkerStatusChanged?.Invoke("loading C# ONNX model");
         AppLogger.Info(
             $"C# ASR model loading. model={_model.Id}, modelFile={modelFilePath}, config={configFilePath}, threads={threads}");
-        _recognizer = new OfflineRecognizer(
+        _recognizer = new NativeOfflineRecognizer(
             modelFilePath,
             configFilePath,
             mvnFilePath,
@@ -148,6 +149,34 @@ public sealed class ParaformerAsrService : IDisposable
         WorkerStatusChanged?.Invoke("C# ONNX model ready");
         AppLogger.Info($"C# ASR model ready. model={_model.Id}");
         return _recognizer;
+    }
+
+    private SherpaOfflineRecognizer EnsureSherpaRecognizer()
+    {
+        if (_sherpaRecognizer is not null)
+        {
+            return _sherpaRecognizer;
+        }
+
+        var modelDirectory = AsrModelCatalog.GetModelCacheDirectory(_model.AsrModel);
+        var modelPath = FindRequiredFile(modelDirectory, "model.int8.onnx", "model.onnx");
+        var tokensPath = FindRequiredFile(modelDirectory, "tokens.txt");
+        WorkerStatusChanged?.Invoke("loading Sherpa-ONNX model");
+        AppLogger.Info($"Sherpa-ONNX model loading. model={_model.Id}, modelFile={modelPath}, tokens={tokensPath}");
+
+        var config = new OfflineRecognizerConfig();
+        config.FeatConfig.SampleRate = 16000;
+        config.FeatConfig.FeatureDim = 80;
+        config.ModelConfig.Tokens = tokensPath;
+        config.ModelConfig.Paraformer.Model = modelPath;
+        config.ModelConfig.NumThreads = 1;
+        config.ModelConfig.Provider = "cpu";
+        config.DecodingMethod = "greedy_search";
+
+        _sherpaRecognizer = new SherpaOfflineRecognizer(config);
+        WorkerStatusChanged?.Invoke("Sherpa-ONNX model ready");
+        AppLogger.Info($"Sherpa-ONNX model ready. model={_model.Id}");
+        return _sherpaRecognizer;
     }
 
     private void EnsurePunctuationRestorer(CancellationToken cancellationToken)
@@ -190,6 +219,39 @@ public sealed class ParaformerAsrService : IDisposable
         }
     }
 
+    private string RecognizeWithNative(string wavPath, NativeOfflineRecognizer recognizer, CancellationToken cancellationToken)
+    {
+        var samples = LoadNativeWavSamples(wavPath);
+        var chunks = SplitSamples(samples).ToArray();
+        AppLogger.Info($"C# ASR samples loaded. samples={samples.Length}, chunks={chunks.Length}");
+
+        var textParts = new List<string>(chunks.Length);
+        for (var i = 0; i < chunks.Length; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AppLogger.Info($"C# ASR chunk starting. index={i + 1}, total={chunks.Length}, samples={chunks[i].Length}");
+            var results = recognizer.GetResults([chunks[i]]);
+            var chunkText = results.FirstOrDefault()?.Trim();
+            if (!string.IsNullOrWhiteSpace(chunkText))
+            {
+                textParts.Add(chunkText);
+            }
+        }
+
+        return string.Concat(textParts);
+    }
+
+    private string RecognizeWithSherpa(string wavPath, CancellationToken cancellationToken)
+    {
+        var recognizer = EnsureSherpaRecognizer();
+        var (sampleRate, samples) = LoadFloatWavSamples(wavPath);
+        using var stream = recognizer.CreateStream();
+        stream.AcceptWaveform(sampleRate, samples);
+        cancellationToken.ThrowIfCancellationRequested();
+        recognizer.Decode(stream);
+        return stream.Result.Text.Trim();
+    }
+
     private static string ReplaceTrailingFullStopWithSpace(string text)
     {
         if (string.IsNullOrEmpty(text))
@@ -228,7 +290,18 @@ public sealed class ParaformerAsrService : IDisposable
         throw new FileNotFoundException($"模型目录缺少文件: {string.Join(" 或 ", fileNames)}。目录: {directory}");
     }
 
-    private static float[] LoadWavSamples(string wavPath)
+    private static float[] LoadNativeWavSamples(string wavPath)
+    {
+        var (_, samples) = LoadFloatWavSamples(wavPath);
+        for (var i = 0; i < samples.Length; i++)
+        {
+            samples[i] *= 32768f;
+        }
+
+        return samples;
+    }
+
+    private static (int SampleRate, float[] Samples) LoadFloatWavSamples(string wavPath)
     {
         using var reader = new AudioFileReader(wavPath);
         var samples = new List<float>((int)Math.Min(reader.Length / sizeof(float), int.MaxValue));
@@ -238,11 +311,11 @@ public sealed class ParaformerAsrService : IDisposable
         {
             for (var i = 0; i < read; i += reader.WaveFormat.Channels)
             {
-                samples.Add(buffer[i] * 32768f);
+                samples.Add(buffer[i]);
             }
         }
 
-        return samples.ToArray();
+        return (reader.WaveFormat.SampleRate, samples.ToArray());
     }
 
     private static IEnumerable<float[]> SplitSamples(float[] samples)
@@ -266,6 +339,8 @@ public sealed class ParaformerAsrService : IDisposable
     {
         _recognizer?.Dispose();
         _recognizer = null;
+        _sherpaRecognizer?.Dispose();
+        _sherpaRecognizer = null;
     }
 
     public void Dispose()

@@ -14,16 +14,32 @@ public sealed class AsrModelOption
     public required string PunctuationModel { get; init; }
     public required string VadModel { get; init; }
     public string Revision { get; init; } = "v2.0.5";
+    public AsrEngine Engine { get; init; } = AsrEngine.NativeParaformer;
+    public ModelProvider Provider { get; init; } = ModelProvider.ModelScope;
+    public bool RequiresPunctuationModel { get; init; } = true;
+    public bool RequiresVadModel { get; init; } = true;
     public bool IsSupported { get; init; } = true;
     public bool IsDownloaded => IsSupported && AsrModelCatalog.IsModelDownloaded(AsrModel);
     public bool CanSelectInPicker => IsDownloaded;
-    public bool IsPunctuationDownloaded => IsSupported && AsrModelCatalog.IsPunctuationModelDownloaded(PunctuationModel);
-    public bool IsVadDownloaded => IsSupported && AsrModelCatalog.IsVadModelDownloaded(VadModel);
+    public bool IsPunctuationDownloaded => !RequiresPunctuationModel || (IsSupported && AsrModelCatalog.IsPunctuationModelDownloaded(PunctuationModel));
+    public bool IsVadDownloaded => !RequiresVadModel || (IsSupported && AsrModelCatalog.IsVadModelDownloaded(VadModel));
 
     public override string ToString()
     {
         return DisplayName;
     }
+}
+
+public enum AsrEngine
+{
+    NativeParaformer,
+    SherpaOnnxParaformer
+}
+
+public enum ModelProvider
+{
+    ModelScope,
+    HuggingFace
 }
 
 public static class AsrModelCatalog
@@ -59,6 +75,19 @@ public static class AsrModelCatalog
             AsrModel = "iic/speech_paraformer-large-contextual_asr_nat-zh-cn-16k-common-vocab8404-onnx",
             PunctuationModel = DefaultPunctuationModel,
             VadModel = DefaultVadModel
+        },
+        new AsrModelOption
+        {
+            Id = "sherpa-onnx-paraformer-zh-cn",
+            DisplayName = "sherpa-onnx-paraformer-zh-cn（Sherpa 中文模型）",
+            Description = "Sherpa-ONNX 中文离线识别模型，便于对比新识别引擎。",
+            AsrModel = "csukuangfj/sherpa-onnx-paraformer-zh-2023-03-28",
+            PunctuationModel = DefaultPunctuationModel,
+            VadModel = DefaultVadModel,
+            Revision = "main",
+            Engine = AsrEngine.SherpaOnnxParaformer,
+            Provider = ModelProvider.HuggingFace,
+            RequiresVadModel = false
         }
     ];
 
@@ -74,6 +103,12 @@ public static class AsrModelCatalog
 
     public static bool IsModelDownloaded(string modelName)
     {
+        var model = Models.FirstOrDefault(item => string.Equals(item.AsrModel, modelName, StringComparison.Ordinal));
+        if (model?.Engine == AsrEngine.SherpaOnnxParaformer)
+        {
+            return IsSherpaParaformerModelDownloaded(modelName);
+        }
+
         var directory = GetModelCacheDirectory(modelName);
         var hasModel = File.Exists(Path.Combine(directory, "model_quant.onnx"))
             || File.Exists(Path.Combine(directory, "model.onnx"));
@@ -85,6 +120,13 @@ public static class AsrModelCatalog
             && hasConfig
             && hasTokens
             && File.Exists(Path.Combine(directory, "am.mvn"));
+    }
+
+    public static bool IsSherpaParaformerModelDownloaded(string modelName)
+    {
+        var directory = GetModelCacheDirectory(modelName);
+        return File.Exists(Path.Combine(directory, "model.int8.onnx"))
+            && File.Exists(Path.Combine(directory, "tokens.txt"));
     }
 
     public static bool IsPunctuationModelDownloaded(string modelName)
@@ -112,8 +154,7 @@ public static class AsrModelCatalog
 
     public static bool AreSharedModelsDownloaded(AsrModelOption model)
     {
-        return IsPunctuationModelDownloaded(model.PunctuationModel)
-            && IsVadModelDownloaded(model.VadModel);
+        return model.IsPunctuationDownloaded && model.IsVadDownloaded;
     }
 
     public static string GetModelCacheDirectory(string modelName)
