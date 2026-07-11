@@ -102,8 +102,9 @@
       </LinearGradientBrush>
     </Border.Background>
 
-    <Grid RowDefinitions="82,*">
-      <Grid x:Name="TitleBar"
+    <Grid>
+      <Grid RowDefinitions="82,*">
+        <Grid x:Name="TitleBar"
             Grid.Row="0"
             ColumnDefinitions="52,*,168"
             Margin="24,18,18,12"
@@ -161,9 +162,9 @@
                   BorderThickness="1"
                   CornerRadius="10" />
         </StackPanel>
-      </Grid>
+        </Grid>
 
-      <Grid Grid.Row="1"
+        <Grid Grid.Row="1"
             Margin="24,0,24,24"
             ColumnDefinitions="1.04*,18,0.96*"
             RowDefinitions="Auto,*,Auto">
@@ -432,7 +433,12 @@
                      Foreground="#536174"
                      TextWrapping="Wrap" />
         </Border>
+        </Grid>
       </Grid>
+
+      <Border x:Name="DialogBackdrop"
+              IsVisible="False"
+              Background="#8AF4F8FF" />
     </Grid>
   </Border>
 </Window>

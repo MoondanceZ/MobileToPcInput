@@ -261,8 +261,16 @@ public partial class MainWindow : Window
             GetModelOperationSnapshot,
             handler => ModelOperationChanged += handler,
             handler => ModelOperationChanged -= handler);
-        await window.ShowDialog(this);
-        RefreshModels();
+        ShowDialogBackdrop();
+        try
+        {
+            await window.ShowDialog(this);
+        }
+        finally
+        {
+            HideDialogBackdrop();
+            RefreshModels();
+        }
     }
 
     private async Task LoadModelFromManagerAsync(AsrModelOption model)
@@ -1009,7 +1017,30 @@ public partial class MainWindow : Window
             Child = content
         };
 
-        return await dialog.ShowDialog<bool>(this);
+        ShowDialogBackdrop();
+        try
+        {
+            return await dialog.ShowDialog<bool>(this);
+        }
+        finally
+        {
+            HideDialogBackdrop();
+        }
+    }
+
+    private void ShowDialogBackdrop()
+    {
+        DialogBackdrop.IsVisible = true;
+        Surface.Effect = new BlurEffect
+        {
+            Radius = 8
+        };
+    }
+
+    private void HideDialogBackdrop()
+    {
+        DialogBackdrop.IsVisible = false;
+        Surface.Effect = null;
     }
 
     private void DragWindow(object? sender, PointerPressedEventArgs e)
