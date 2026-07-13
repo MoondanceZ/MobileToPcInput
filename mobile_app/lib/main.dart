@@ -54,6 +54,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   static const _hostKey = 'receiver_host';
   static const _portKey = 'receiver_port';
   static const _deepLinkChannel = MethodChannel('mobile_to_pc_input/deep_link');
+  static const _keepScreenOnIdleTimeout = Duration(minutes: 10);
 
   final _hostController = TextEditingController();
   final _portController = TextEditingController(text: '8765');
@@ -72,8 +73,10 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _isHandlingSocketClosed = false;
   bool _isAsrSessionActive = false;
   bool _isKeepScreenOn = false;
+  bool _isKeepScreenIdleTimedOut = false;
   bool _isTalkPressed = false;
   int? _activeTalkPointer;
+  Timer? _keepScreenIdleTimer;
   double _level = 0;
   String _status = '未连接';
 
@@ -81,6 +84,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   void initState() {
     super.initState();
     _deepLinkChannel.setMethodCallHandler(_handleDeepLinkCall);
+    _hostController.addListener(_handleUserInput);
+    _portController.addListener(_handleUserInput);
     _loadSettings();
   }
 
@@ -414,6 +419,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   }
 
   void _handleTalkPointerDown(PointerDownEvent event) {
+    _handleUserInput();
     if (!_isConnected ||
         _isConnecting ||
         _isReconnecting ||
@@ -427,6 +433,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   }
 
   void _handleTalkPointerEnd(PointerEvent event) {
+    _handleUserInput();
     if (_activeTalkPointer != event.pointer) {
       return;
     }
@@ -459,8 +466,49 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
   }
 
+  bool get _shouldKeepScreenOnForConnection =>
+      _isConnecting || _isConnected || _isReconnecting;
+
+  void _handleUserInput() {
+    if (!mounted) {
+      return;
+    }
+
+    final wasIdleTimedOut = _isKeepScreenIdleTimedOut;
+    _isKeepScreenIdleTimedOut = false;
+    _scheduleKeepScreenIdleTimer();
+    if (wasIdleTimedOut) {
+      _syncKeepScreenOn();
+    }
+  }
+
+  void _scheduleKeepScreenIdleTimer() {
+    _keepScreenIdleTimer?.cancel();
+    if (!_shouldKeepScreenOnForConnection || _isKeepScreenIdleTimedOut) {
+      return;
+    }
+
+    _keepScreenIdleTimer = Timer(_keepScreenOnIdleTimeout, () {
+      if (!mounted || !_shouldKeepScreenOnForConnection) {
+        return;
+      }
+
+      _isKeepScreenIdleTimedOut = true;
+      _syncKeepScreenOn();
+    });
+  }
+
   void _syncKeepScreenOn() {
-    final shouldKeepScreenOn = _isConnecting || _isConnected || _isReconnecting;
+    if (!_shouldKeepScreenOnForConnection) {
+      _keepScreenIdleTimer?.cancel();
+      _keepScreenIdleTimer = null;
+      _isKeepScreenIdleTimedOut = false;
+    } else {
+      _scheduleKeepScreenIdleTimer();
+    }
+
+    final shouldKeepScreenOn =
+        _shouldKeepScreenOnForConnection && !_isKeepScreenIdleTimedOut;
     if (_isKeepScreenOn == shouldKeepScreenOn) {
       return;
     }
@@ -491,6 +539,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
   @override
   void dispose() {
+    _keepScreenIdleTimer?.cancel();
     if (_isKeepScreenOn) {
       unawaited(
         _deepLinkChannel
@@ -502,6 +551,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     _socketSubscription?.cancel();
     _recorder.dispose();
     _socket?.close();
+    _hostController.removeListener(_handleUserInput);
+    _portController.removeListener(_handleUserInput);
     _hostController.dispose();
     _portController.dispose();
     super.dispose();
@@ -512,67 +563,72 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     final isConnectionBusy = _isConnecting || _isReconnecting;
     final canTalk = _isConnected && !isConnectionBusy;
 
-    return Scaffold(
-      backgroundColor: _appBackgroundColor,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxHeight < 720;
-            final isVeryCompact = constraints.maxHeight < 620;
-            final verticalPadding = isVeryCompact
-                ? 10.0
-                : isCompact
-                ? 22.0
-                : 46.0;
-            final buttonSize = isVeryCompact
-                ? 132.0
-                : isCompact
-                ? 168.0
-                : 188.0;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _handleUserInput(),
+      onPointerMove: (_) => _handleUserInput(),
+      child: Scaffold(
+        backgroundColor: _appBackgroundColor,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxHeight < 720;
+              final isVeryCompact = constraints.maxHeight < 620;
+              final verticalPadding = isVeryCompact
+                  ? 10.0
+                  : isCompact
+                  ? 22.0
+                  : 46.0;
+              final buttonSize = isVeryCompact
+                  ? 132.0
+                  : isCompact
+                  ? 168.0
+                  : 188.0;
 
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, verticalPadding, 20, 28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildReceiverCard(
-                    context,
-                    isConnectionBusy,
-                    isCompact: isVeryCompact,
-                  ),
-                  SizedBox(
-                    height: isVeryCompact
-                        ? 10
-                        : isCompact
-                        ? 16
-                        : 22,
-                  ),
-                  _StatusPanel(
-                    status: _status,
-                    isConnected: _isConnected,
-                    isConnecting: _isConnecting,
-                    isReconnecting: _isReconnecting,
-                    isRecording: _isRecording,
-                    level: _level,
-                    onRetry: _connect,
-                  ),
-                  const Spacer(),
-                  _buildTalkButton(canTalk: canTalk, size: buttonSize),
-                  const Spacer(),
-                  if (!isVeryCompact)
-                    Text(
-                      _isConnected ? '正在使用电脑语音输入' : '连接电脑后启用语音输入',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Color(0xff718096),
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
+              return Padding(
+                padding: EdgeInsets.fromLTRB(20, verticalPadding, 20, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildReceiverCard(
+                      context,
+                      isConnectionBusy,
+                      isCompact: isVeryCompact,
                     ),
-                ],
-              ),
-            );
-          },
+                    SizedBox(
+                      height: isVeryCompact
+                          ? 10
+                          : isCompact
+                          ? 16
+                          : 22,
+                    ),
+                    _StatusPanel(
+                      status: _status,
+                      isConnected: _isConnected,
+                      isConnecting: _isConnecting,
+                      isReconnecting: _isReconnecting,
+                      isRecording: _isRecording,
+                      level: _level,
+                      onRetry: _connect,
+                    ),
+                    const Spacer(),
+                    _buildTalkButton(canTalk: canTalk, size: buttonSize),
+                    const Spacer(),
+                    if (!isVeryCompact)
+                      Text(
+                        _isConnected ? '正在使用电脑语音输入' : '连接电脑后启用语音输入',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xff718096),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
