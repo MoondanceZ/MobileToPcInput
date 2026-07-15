@@ -6,7 +6,6 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.VisualTree;
 
 namespace pc_receiver;
 
@@ -19,7 +18,13 @@ public partial class ModelManagerWindow : Window
     private readonly Func<ModelOperationSnapshot> _getOperationSnapshot;
     private readonly Action<Action> _subscribeOperationChanged;
     private readonly Action<Action> _unsubscribeOperationChanged;
+    private readonly Func<AppSettings> _getSettings;
+    private readonly Action<string, string> _saveXiaomiSettings;
+    private readonly Func<bool, string, string, Task> _switchRecognitionModeAsync;
+    private readonly Func<string?> _getActiveOnlineServiceId;
     private bool _lastOperationIsRunning;
+    private bool _showingOnlineServices;
+    private string _xiaomiLanguage = "auto";
 
     public ModelManagerWindow()
         : this(
@@ -29,7 +34,11 @@ public partial class ModelManagerWindow : Window
             static () => null,
             static () => new ModelOperationSnapshot(false, string.Empty, 0, false),
             static _ => { },
-            static _ => { })
+            static _ => { },
+            static () => new AppSettings(),
+            static (_, _) => { },
+            static (_, _, _) => Task.CompletedTask,
+            static () => null)
     {
     }
 
@@ -40,7 +49,11 @@ public partial class ModelManagerWindow : Window
         Func<string?> getLoadedModelId,
         Func<ModelOperationSnapshot> getOperationSnapshot,
         Action<Action> subscribeOperationChanged,
-        Action<Action> unsubscribeOperationChanged)
+        Action<Action> unsubscribeOperationChanged,
+        Func<AppSettings> getSettings,
+        Action<string, string> saveXiaomiSettings,
+        Func<bool, string, string, Task> switchRecognitionModeAsync,
+        Func<string?> getActiveOnlineServiceId)
     {
         _loadModelAsync = loadModelAsync;
         _deleteModelAsync = deleteModelAsync;
@@ -49,6 +62,10 @@ public partial class ModelManagerWindow : Window
         _getOperationSnapshot = getOperationSnapshot;
         _subscribeOperationChanged = subscribeOperationChanged;
         _unsubscribeOperationChanged = unsubscribeOperationChanged;
+        _getSettings = getSettings;
+        _saveXiaomiSettings = saveXiaomiSettings;
+        _switchRecognitionModeAsync = switchRecognitionModeAsync;
+        _getActiveOnlineServiceId = getActiveOnlineServiceId;
 
         WindowDecorations = WindowDecorations.None;
         CanResize = false;
@@ -59,11 +76,14 @@ public partial class ModelManagerWindow : Window
             WindowTransparencyLevel.None
         ];
         InitializeComponent();
-        Surface.AddHandler(PointerPressedEvent, DragWindowFromTopArea, RoutingStrategies.Tunnel);
-        TitleBar.AddHandler(PointerPressedEvent, DragWindow, RoutingStrategies.Tunnel);
         _subscribeOperationChanged(OnModelOperationChanged);
         _lastOperationIsRunning = _getOperationSnapshot().IsRunning;
+        LoadOnlineSettings();
+        _showingOnlineServices = IsOnlineServiceActive();
+        LocalModelsHost.IsVisible = !_showingOnlineServices;
+        OnlineServicesHost.IsVisible = _showingOnlineServices;
         RenderModels();
+        RenderOnlineServices();
     }
 
     private void RenderModels()
@@ -75,6 +95,64 @@ public partial class ModelManagerWindow : Window
         }
 
         ApplyOperationSnapshot();
+    }
+
+    private void LoadOnlineSettings()
+    {
+        var settings = _getSettings();
+        XiaomiApiKeyBox.Text = settings.XiaomiMimoApiKey;
+        _xiaomiLanguage = XiaomiMimoAsrService.NormalizeLanguage(settings.XiaomiMimoLanguage);
+        ApplyLanguageButtons();
+    }
+
+    private void RenderOnlineServices()
+    {
+        EnableXiaomiButton.Content = "保存";
+        EnableXiaomiButton.IsEnabled = !_getOperationSnapshot().IsRunning;
+        EnableXiaomiButton.Background = Brush("#1769E0");
+        EnableXiaomiButton.Foreground = Brushes.White;
+        EnableXiaomiButton.BorderBrush = Brush("#1769E0");
+        ApplyTabState();
+    }
+
+    private async Task SetTabAsync(bool online)
+    {
+        _showingOnlineServices = online;
+        LocalModelsHost.IsVisible = !online;
+        OnlineServicesHost.IsVisible = online;
+        ApplyTabState();
+        ApplyOperationSnapshot();
+        SaveXiaomiSettings();
+
+        try
+        {
+            await _switchRecognitionModeAsync(online, XiaomiApiKeyBox.Text ?? string.Empty, _xiaomiLanguage);
+            RenderOnlineServices();
+            ApplyOperationSnapshot();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = ex.Message;
+        }
+    }
+
+    private void ApplyTabState()
+    {
+        LocalTabSelection.IsVisible = !_showingOnlineServices;
+        OnlineTabSelection.IsVisible = _showingOnlineServices;
+        OnlineTabSelection.Background = Brush("#1769E0");
+        LocalTabLabel.Foreground = _showingOnlineServices ? Brush("#536174") : Brushes.White;
+        OnlineTabLabel.Foreground = _showingOnlineServices ? Brushes.White : Brush("#536174");
+    }
+
+    private bool IsOnlineServiceActive()
+    {
+        return _getActiveOnlineServiceId() == OnlineAsrCatalog.XiaomiMimoServiceId;
+    }
+
+    private void SaveXiaomiSettings()
+    {
+        _saveXiaomiSettings(XiaomiApiKeyBox.Text ?? string.Empty, _xiaomiLanguage);
     }
 
     private Control CreateModelRow(AsrModelOption model)
@@ -254,13 +332,97 @@ public partial class ModelManagerWindow : Window
 
     private void ApplyOperationSnapshot(ModelOperationSnapshot snapshot)
     {
-        StatusText.Text = string.IsNullOrWhiteSpace(snapshot.Message)
-            ? "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。"
+        StatusText.Text = _showingOnlineServices && !snapshot.IsRunning
+            ? "当前使用：小米 MiMo ASR · " + GetLanguageDisplayName(_xiaomiLanguage)
+            : string.IsNullOrWhiteSpace(snapshot.Message)
+            ? _showingOnlineServices
+                ? "当前使用：小米 MiMo ASR · " + GetLanguageDisplayName(_xiaomiLanguage)
+                : "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。"
             : snapshot.Message;
         var showProgress = snapshot.IsRunning && snapshot.Progress < 100;
         DownloadProgress.IsVisible = showProgress;
         DownloadProgress.IsIndeterminate = showProgress && snapshot.IsIndeterminate;
         DownloadProgress.Value = showProgress ? snapshot.Progress : 0;
+        RenderOnlineServices();
+    }
+
+    private async void LocalTabHitArea_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        await SetTabAsync(online: false);
+    }
+
+    private async void OnlineTabHitArea_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        await SetTabAsync(online: true);
+    }
+
+    private void XiaomiApiKeyBox_LostFocus(object? sender, RoutedEventArgs e)
+    {
+        SaveXiaomiSettings();
+    }
+
+    private void LanguageButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is string language)
+        {
+            _xiaomiLanguage = XiaomiMimoAsrService.NormalizeLanguage(language);
+            ApplyLanguageButtons();
+            SaveXiaomiSettings();
+        }
+    }
+
+    private async void EnableXiaomiButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_getOperationSnapshot().IsRunning)
+        {
+            return;
+        }
+
+        SaveXiaomiSettings();
+        try
+        {
+            await _switchRecognitionModeAsync(true, XiaomiApiKeyBox.Text ?? string.Empty, _xiaomiLanguage);
+            RenderOnlineServices();
+            ApplyOperationSnapshot();
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = ex.Message;
+        }
+    }
+
+    private void ApplyLanguageButtons()
+    {
+        ApplyLanguageButton(LanguageAutoSelection, LanguageAutoLabel, _xiaomiLanguage == "auto");
+        ApplyLanguageButton(LanguageZhSelection, LanguageZhLabel, _xiaomiLanguage == "zh");
+        ApplyLanguageButton(LanguageEnSelection, LanguageEnLabel, _xiaomiLanguage == "en");
+    }
+
+    private static void ApplyLanguageButton(Border selection, TextBlock label, bool selected)
+    {
+        selection.IsVisible = selected;
+        label.Foreground = selected ? Brushes.White : Brush("#536174");
+        label.FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal;
+    }
+
+    private static string GetLanguageDisplayName(string language)
+    {
+        return XiaomiMimoAsrService.NormalizeLanguage(language) switch
+        {
+            "zh" => "中文",
+            "en" => "英文",
+            _ => "自动语种"
+        };
     }
 
     private void CloseButton_Click(object? sender, RoutedEventArgs e)
@@ -272,47 +434,6 @@ public partial class ModelManagerWindow : Window
     {
         _unsubscribeOperationChanged(OnModelOperationChanged);
         base.OnClosed(e);
-    }
-
-    private void DragWindow(object? sender, PointerPressedEventArgs e)
-    {
-        if (IsInsideButton(e.Source as Visual))
-        {
-            return;
-        }
-
-        if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-        {
-            BeginMoveDrag(e);
-        }
-    }
-
-    private void DragWindowFromTopArea(object? sender, PointerPressedEventArgs e)
-    {
-        if (IsInsideButton(e.Source as Visual))
-        {
-            return;
-        }
-
-        if (e.GetPosition(this).Y <= 90 && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-        {
-            BeginMoveDrag(e);
-        }
-    }
-
-    private static bool IsInsideButton(Visual? visual)
-    {
-        while (visual != null)
-        {
-            if (visual is Button)
-            {
-                return true;
-            }
-
-            visual = visual.GetVisualParent();
-        }
-
-        return false;
     }
 
     private static IBrush Brush(string hex)

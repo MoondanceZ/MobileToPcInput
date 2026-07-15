@@ -256,7 +256,7 @@ public sealed class ParaformerAsrService : IDisposable
         return stream.Result.Text.Trim();
     }
 
-    private static string ReplaceTrailingFullStopWithSpace(string text)
+    public static string ReplaceTrailingFullStopWithSpace(string text)
     {
         if (string.IsNullOrEmpty(text))
         {

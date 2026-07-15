@@ -14,7 +14,7 @@
           BorderBrush="#D8E1EC"
           BorderThickness="1"
           BoxShadow="0 18 34 0 #2D17263B">
-    <Grid RowDefinitions="72,*">
+    <Grid RowDefinitions="72,48,*">
       <Grid x:Name="TitleBar"
             Grid.Row="0"
             ColumnDefinitions="*,Auto"
@@ -48,10 +48,55 @@
                 CornerRadius="10" />
       </Grid>
 
-      <Grid Grid.Row="1"
+      <Border Grid.Row="1"
+              Width="280"
+              Height="38"
+              HorizontalAlignment="Center"
+              CornerRadius="12"
+              Background="White"
+              BorderBrush="#D6E0EC"
+              BorderThickness="1"
+              Padding="3">
+        <Grid ColumnDefinitions="*,*">
+          <Border x:Name="LocalTabSelection"
+                  Grid.Column="0"
+                  CornerRadius="9"
+                  Background="#1769E0" />
+          <Border x:Name="OnlineTabSelection"
+                  Grid.Column="1"
+                  CornerRadius="9"
+                  Background="#1769E0"
+                  IsVisible="False" />
+          <TextBlock x:Name="LocalTabLabel"
+                     Grid.Column="0"
+                     Text="本地离线"
+                     FontSize="14"
+                     FontWeight="SemiBold"
+                     Foreground="White"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+          <TextBlock x:Name="OnlineTabLabel"
+                     Grid.Column="1"
+                     Text="在线服务"
+                     FontSize="14"
+                     FontWeight="SemiBold"
+                     Foreground="#536174"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+          <Border Grid.Column="0"
+                  Background="#01FFFFFF"
+                  PointerPressed="LocalTabHitArea_PointerPressed" />
+          <Border Grid.Column="1"
+                  Background="#01FFFFFF"
+                  PointerPressed="OnlineTabHitArea_PointerPressed" />
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="2"
             RowDefinitions="*,Auto,Auto"
             Margin="24,4,24,30">
-        <ScrollViewer Grid.Row="0"
+        <ScrollViewer x:Name="LocalModelsHost"
+                      Grid.Row="0"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
                       ClipToBounds="True">
@@ -59,6 +104,206 @@
                       Spacing="12"
                       Margin="0,0,8,0" />
         </ScrollViewer>
+
+        <StackPanel x:Name="OnlineServicesHost"
+                    Grid.Row="0"
+                    IsVisible="False"
+                    Spacing="12">
+          <Border CornerRadius="14"
+                  Padding="18,16"
+                  Background="White"
+                  BorderBrush="#DDE6F1"
+                  BorderThickness="1">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto"
+                  RowSpacing="14">
+              <Grid ColumnDefinitions="56,*,Auto"
+                    ColumnSpacing="14">
+                <Border Width="46"
+                        Height="46"
+                        CornerRadius="12"
+                        Background="#1769E0">
+                  <TextBlock Text="Mi"
+                             FontSize="18"
+                             FontWeight="SemiBold"
+                             Foreground="White"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1"
+                            Spacing="3"
+                            VerticalAlignment="Center">
+                  <StackPanel Orientation="Horizontal"
+                              Spacing="8">
+                    <TextBlock Text="小米 MiMo ASR"
+                               FontSize="19"
+                               FontWeight="SemiBold"
+                               Foreground="#1C2739" />
+                    <Border CornerRadius="8"
+                            Padding="6,2"
+                            Background="#EEF6FF"
+                            BorderBrush="#BBD5FF"
+                            BorderThickness="1">
+                      <TextBlock Text="在线"
+                                 FontSize="12"
+                                 Foreground="#1769E0" />
+                    </Border>
+                  </StackPanel>
+                  <TextBlock Text="mimo-v2.5-asr"
+                             FontSize="13"
+                             Foreground="#718096" />
+                  <TextBlock Text="中英双语与方言识别，自动标点，适合需要联网高准确率的场景。"
+                             FontSize="12"
+                             Foreground="#536174"
+                             TextWrapping="Wrap" />
+                </StackPanel>
+                <Button x:Name="EnableXiaomiButton"
+                        Grid.Column="2"
+                        MinHeight="36"
+                        Padding="20,8"
+                        Click="EnableXiaomiButton_Click"
+                        Content="启用"
+                        Background="#1769E0"
+                        Foreground="White"
+                        BorderBrush="#1769E0"
+                        BorderThickness="1"
+                        CornerRadius="10"
+                        FontWeight="SemiBold" />
+              </Grid>
+
+              <Border Grid.Row="1"
+                      Height="1"
+                      Background="#E1E8F0" />
+
+              <Grid Grid.Row="2"
+                    ColumnDefinitions="86,*"
+                    RowDefinitions="Auto,Auto"
+                    RowSpacing="12"
+                    ColumnSpacing="12">
+                <TextBlock Grid.Row="0"
+                           Grid.Column="0"
+                           Text="API Key"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="#1C2739"
+                           VerticalAlignment="Center" />
+                <Border Grid.Row="0"
+                        Grid.Column="1"
+                        Height="40"
+                        CornerRadius="9"
+                        Background="#FBFDFF"
+                        BorderBrush="#D6E0EC"
+                        BorderThickness="1">
+                  <TextBox x:Name="XiaomiApiKeyBox"
+                           Height="38"
+                           PasswordChar="•"
+                           PlaceholderText="mimo sk-..."
+                           BorderThickness="0"
+                           Background="Transparent"
+                           VerticalContentAlignment="Center"
+                           Padding="12,0"
+                           LostFocus="XiaomiApiKeyBox_LostFocus" />
+                </Border>
+
+                <TextBlock Grid.Row="1"
+                           Grid.Column="0"
+                           Text="识别语言"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Foreground="#1C2739"
+                           VerticalAlignment="Center" />
+                <Border Grid.Row="1"
+                        Grid.Column="1"
+                        Height="40"
+                        CornerRadius="10"
+                        Background="#FBFDFF"
+                        BorderBrush="#D6E0EC"
+                        BorderThickness="1"
+                        Padding="3">
+                  <Grid ColumnDefinitions="*,*,*">
+                    <Border x:Name="LanguageAutoSelection"
+                            Grid.Column="0"
+                            CornerRadius="8"
+                            Background="#1769E0" />
+                    <Border x:Name="LanguageZhSelection"
+                            Grid.Column="1"
+                            CornerRadius="8"
+                            Background="#1769E0"
+                            IsVisible="False" />
+                    <Border x:Name="LanguageEnSelection"
+                            Grid.Column="2"
+                            CornerRadius="8"
+                            Background="#1769E0"
+                            IsVisible="False" />
+                    <TextBlock x:Name="LanguageAutoLabel"
+                               Grid.Column="0"
+                               Text="自动"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="White"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <TextBlock x:Name="LanguageZhLabel"
+                               Grid.Column="1"
+                               Text="中文"
+                               FontSize="13"
+                               Foreground="#536174"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <TextBlock x:Name="LanguageEnLabel"
+                               Grid.Column="2"
+                               Text="英文"
+                               FontSize="13"
+                               Foreground="#536174"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="LanguageAutoButton"
+                            Grid.Column="0"
+                            MinHeight="32"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Click="LanguageButton_Click"
+                            Tag="auto"
+                            Content=""
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            Padding="0" />
+                    <Button x:Name="LanguageZhButton"
+                            Grid.Column="1"
+                            MinHeight="32"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Click="LanguageButton_Click"
+                            Tag="zh"
+                            Content=""
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            Padding="0" />
+                    <Button x:Name="LanguageEnButton"
+                            Grid.Column="2"
+                            MinHeight="32"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Click="LanguageButton_Click"
+                            Tag="en"
+                            Content=""
+                            Background="Transparent"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            Padding="0" />
+                  </Grid>
+                </Border>
+              </Grid>
+
+              <TextBlock Grid.Row="3"
+                         Text="在线识别会上传音频到小米 MiMo API；本地模型仍可离线使用。"
+                         FontSize="12"
+                         Foreground="#718096"
+                         TextWrapping="Wrap" />
+            </Grid>
+          </Border>
+        </StackPanel>
 
         <TextBlock x:Name="StatusText"
                    Grid.Row="1"

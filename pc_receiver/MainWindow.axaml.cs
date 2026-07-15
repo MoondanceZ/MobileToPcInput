@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly AudioReceiverServer _server = new();
     private readonly AsrSessionBuffer _asrBuffer = new();
     private readonly ParaformerAsrService _asrService = new();
+    private readonly XiaomiMimoAsrService _xiaomiMimoAsrService = new();
     private readonly ModelDownloadService _modelDownloadService = new();
     private readonly AppSettingsService _settingsService = new();
     private readonly StartupService _startupService = new();
@@ -226,9 +227,13 @@ public partial class MainWindow : Window
         try
         {
             DeviceBox.ItemsSource = null;
-            DeviceBox.ItemsSource = AsrModelCatalog.Models.ToArray();
-            DeviceBox.SelectedItem = AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
-                ?? AsrModelCatalog.DefaultModel;
+            DeviceBox.ItemsSource = IsOnlineRecognitionSelected()
+                ? new object[] { OnlineAsrCatalog.DefaultService }
+                : AsrModelCatalog.Models.Cast<object>().ToArray();
+            DeviceBox.SelectedItem = IsOnlineRecognitionSelected()
+                ? OnlineAsrCatalog.DefaultService
+                : AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
+                    ?? AsrModelCatalog.DefaultModel;
             HintText.Text = "当前使用本机离线语音识别；模型可在“模型管理”中维护。";
             UpdateModelUi();
         }
@@ -260,7 +265,11 @@ public partial class MainWindow : Window
             () => _isAsrReady ? _asrService.CurrentModel.Id : null,
             GetModelOperationSnapshot,
             handler => ModelOperationChanged += handler,
-            handler => ModelOperationChanged -= handler);
+            handler => ModelOperationChanged -= handler,
+            () => _settings,
+            SaveXiaomiSettings,
+            SwitchRecognitionModeFromManagerAsync,
+            GetActiveOnlineServiceId);
         ShowDialogBackdrop();
         try
         {
@@ -487,9 +496,22 @@ public partial class MainWindow : Window
         return DeviceBox.SelectedItem as AsrModelOption;
     }
 
+    private AsrModelOption? GetSelectedLocalModel()
+    {
+        return DeviceBox.SelectedItem as AsrModelOption
+            ?? AsrModelCatalog.Models.FirstOrDefault(item => item.Id == _settings.SelectedModelId)
+            ?? AsrModelCatalog.DefaultModel;
+    }
+
     private void UpdateModelUi()
     {
-        var model = GetSelectedModel();
+        if (IsOnlineRecognitionSelected())
+        {
+            HintText.Text = $"当前使用：{OnlineAsrCatalog.DefaultService.DisplayName} · {GetLanguageDisplayName(_settings.XiaomiMimoLanguage)}。";
+            return;
+        }
+
+        var model = GetSelectedLocalModel();
         if (model is null)
         {
             return;
@@ -514,14 +536,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        var model = GetSelectedModel();
+        var model = GetSelectedLocalModel();
         if (model is null)
         {
             return;
         }
 
         UpdateModelUi();
-        if (model.Id == _asrService.CurrentModel.Id)
+        if (!IsOnlineRecognitionSelected() && model.Id == _asrService.CurrentModel.Id)
         {
             return;
         }
@@ -556,7 +578,19 @@ public partial class MainWindow : Window
 
     private async Task<bool> EnsureSelectedModelReadyAsync()
     {
-        var model = GetSelectedModel();
+        if (IsOnlineRecognitionSelected())
+        {
+            if (string.IsNullOrWhiteSpace(_settings.XiaomiMimoApiKey))
+            {
+                StatusText.Text = "请先在模型管理中配置小米 MiMo API Key";
+                return false;
+            }
+
+            _isAsrReady = true;
+            return true;
+        }
+
+        var model = GetSelectedLocalModel();
         if (model is null)
         {
             StatusText.Text = "请选择语音模型";
@@ -727,7 +761,9 @@ public partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(() => StatusText.Text = "正在识别语音...");
             wavPath = _asrBuffer.WriteWavFile(pcmBytes);
-            var text = await _asrService.RecognizeAsync(wavPath);
+            var text = IsOnlineRecognitionSelected()
+                ? await RecognizeOnlineAsync(wavPath)
+                : await _asrService.RecognizeAsync(wavPath);
             if (string.IsNullOrWhiteSpace(text))
             {
                 AppLogger.Info("ASR returned empty text.");
@@ -810,7 +846,22 @@ public partial class MainWindow : Window
 
     private async Task WarmUpAsrOnStartupAsync()
     {
-        var model = GetSelectedModel() ?? _asrService.CurrentModel;
+        if (IsOnlineRecognitionSelected())
+        {
+            if (string.IsNullOrWhiteSpace(_settings.XiaomiMimoApiKey))
+            {
+                _isAsrReady = false;
+                StatusText.Text = "请先在模型管理中配置小米 MiMo API Key";
+                return;
+            }
+
+            _isAsrReady = true;
+            SetStatus("● 在线服务已就绪", "#1769E0", "#EEF6FF");
+            await StartListeningAsync();
+            return;
+        }
+
+        var model = GetSelectedLocalModel() ?? _asrService.CurrentModel;
         if (!model.IsDownloaded)
         {
             _isAsrReady = false;
@@ -885,8 +936,92 @@ public partial class MainWindow : Window
 
     private void SaveSelectedModelSetting(AsrModelOption model)
     {
+        _settings.RecognitionMode = "local";
         _settings.SelectedModelId = model.Id;
         SaveSettings();
+    }
+
+    private void SaveXiaomiSettings(string apiKey, string language)
+    {
+        _settings.XiaomiMimoApiKey = apiKey.Trim();
+        _settings.XiaomiMimoLanguage = XiaomiMimoAsrService.NormalizeLanguage(language);
+        _settings.SelectedOnlineServiceId = OnlineAsrCatalog.XiaomiMimoServiceId;
+        SaveSettings();
+    }
+
+    private async Task SwitchRecognitionModeFromManagerAsync(bool useOnlineService, string apiKey, string language)
+    {
+        if (_asrBuffer.IsRecording || _isRecognizing)
+        {
+            throw new InvalidOperationException("正在录音或识别中，完成后再切换识别服务");
+        }
+
+        SaveXiaomiSettings(apiKey, language);
+        if (useOnlineService)
+        {
+            _settings.RecognitionMode = "online";
+            _settings.SelectedOnlineServiceId = OnlineAsrCatalog.XiaomiMimoServiceId;
+            SaveSettings();
+            await _asrService.StopWorkerAsync();
+            _isAsrReady = !string.IsNullOrWhiteSpace(_settings.XiaomiMimoApiKey);
+            SetStatus(
+                _isAsrReady ? "● 小米 MiMo ASR 已启用" : "● 请先填写小米 MiMo API Key",
+                _isAsrReady ? "#1769E0" : "#C13830",
+                _isAsrReady ? "#EEF6FF" : "#FFF1F0");
+            RefreshModels();
+            UpdateModelUi();
+            return;
+        }
+
+        _settings.RecognitionMode = "local";
+        var model = GetSelectedLocalModel() ?? AsrModelCatalog.DefaultModel;
+        if (!model.IsSupported)
+        {
+            throw new InvalidOperationException("当前本地模型暂不支持");
+        }
+
+        if (!model.IsDownloaded)
+        {
+            throw new InvalidOperationException("当前本地模型未下载，请先下载后再切回本地");
+        }
+
+        await WarmUpAsrAsync(model, startListeningWhenReady: true);
+        SaveSelectedModelSetting(model);
+        RefreshModels();
+        UpdateModelUi();
+    }
+
+    private string? GetActiveOnlineServiceId()
+    {
+        return IsOnlineRecognitionSelected() ? _settings.SelectedOnlineServiceId : null;
+    }
+
+    private bool IsOnlineRecognitionSelected()
+    {
+        return string.Equals(_settings.RecognitionMode, "online", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_settings.SelectedOnlineServiceId, OnlineAsrCatalog.XiaomiMimoServiceId, StringComparison.Ordinal);
+    }
+
+    private async Task<string> RecognizeOnlineAsync(string wavPath)
+    {
+        Dispatcher.UIThread.Post(() => StatusText.Text = "正在调用小米 MiMo 识别...");
+        var text = await _xiaomiMimoAsrService.RecognizeAsync(
+            wavPath,
+            _settings.XiaomiMimoApiKey,
+            _settings.XiaomiMimoLanguage);
+        return _settings.ReplaceTrailingFullStopWithSpace
+            ? ParaformerAsrService.ReplaceTrailingFullStopWithSpace(text)
+            : text;
+    }
+
+    private static string GetLanguageDisplayName(string? language)
+    {
+        return XiaomiMimoAsrService.NormalizeLanguage(language) switch
+        {
+            "zh" => "中文",
+            "en" => "英文",
+            _ => "自动语种"
+        };
     }
 
     private void SaveSettings()
