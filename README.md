@@ -68,3 +68,10 @@ Android microphone
   -> TextInputService
   -> 当前光标位置
 ```
+
+<img width="500" height="350" alt="image" src="https://github.com/user-attachments/assets/fb24e223-be70-48c1-b3dc-91e4cb7d0aa5" />
+<br>
+<img width="350" height="750" alt="Screenshot_2026-07-15-22-31-25-592_com yarkool mobiletopcinput mobile_app" src="https://github.com/user-attachments/assets/1d31e15d-6513-4be6-af72-8e43529396ff" />
+
+
+
