@@ -31,7 +31,8 @@ Flutter Android 手机麦克风 + Avalonia Windows 接收器。手机通过 WiFi
 
 首次使用需要完成以下设置：
 
-1. 安装并启用微信输入法与 [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)。
+1. 安装并启用微信输入法与
+   [VB-Audio Virtual Cable](https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip)。
 2. 在 Windows“系统 → 声音 → 输入”中，将
    `CABLE Output (VB-Audio Virtual Cable)`设为默认录音设备。
 3. 启动 `pc_receiver`，将“识别方式”切换为“桥接输入”，确认桥接输出为

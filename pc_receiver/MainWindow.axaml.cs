@@ -25,7 +25,8 @@ public partial class MainWindow : Window
         new(RecognitionModes.Online, "在线服务"),
         new(RecognitionModes.WeType, "桥接输入"),
     ];
-    private const string VbCableDownloadUrl = "https://vb-audio.com/Cable/";
+    private const string VbCableDownloadUrl =
+        "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
 
     private readonly AudioOutputService _audioOutput = new();
     private readonly WeTypeHotkeyService _weTypeHotkey;
@@ -1526,7 +1527,7 @@ public partial class MainWindow : Window
         };
         var description = new TextBlock
         {
-            Text = "桥接输入需要 VB-Audio Virtual Cable。当前没有检测到 CABLE Input，请前往官方页面下载并安装，安装完成后重新选择桥接输入。",
+            Text = "桥接输入需要 VB-Audio Virtual Cable。下载后请解压，以管理员身份运行 VBCABLE_Setup_x64.exe；安装完成并重启 Windows 后，返回软件刷新桥接输出。",
             FontSize = 14,
             Foreground = Brush("#536174"),
             TextWrapping = TextWrapping.Wrap
@@ -1557,7 +1558,7 @@ public partial class MainWindow : Window
         {
             MinHeight = 38,
             Padding = new Thickness(18, 8),
-            Content = "打开官方下载页",
+            Content = "下载 VB-CABLE",
             Background = Brush("#1769E0"),
             Foreground = Brushes.White,
             BorderBrush = Brush("#1769E0"),
