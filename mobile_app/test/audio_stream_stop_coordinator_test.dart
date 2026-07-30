@@ -36,4 +36,30 @@ void main() {
       'flush-socket',
     ]);
   });
+
+  test('continues cleanup when stopping the recorder fails', () async {
+    final events = <String>[];
+    final errors = <Object>[];
+    final streamDone = Completer<void>();
+
+    await finishAudioStream(
+      stopRecorder: () async {
+        events.add('stop-recorder');
+        throw StateError('Android recorder stop failed');
+      },
+      streamDone: streamDone.future,
+      cancelSubscription: () async {
+        events.add('cancel-subscription');
+      },
+      flushSocket: () async {
+        events.add('flush-socket');
+      },
+      timeout: const Duration(seconds: 5),
+      onError: errors.add,
+    ).timeout(const Duration(milliseconds: 500));
+
+    expect(events, ['stop-recorder', 'cancel-subscription', 'flush-socket']);
+    expect(errors, hasLength(1));
+    expect(errors.single, isA<StateError>());
+  });
 }

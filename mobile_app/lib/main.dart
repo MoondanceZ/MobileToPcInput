@@ -54,11 +54,13 @@ class MicrophoneBridgePage extends StatefulWidget {
   State<MicrophoneBridgePage> createState() => _MicrophoneBridgePageState();
 }
 
-class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
+class _MicrophoneBridgePageState extends State<MicrophoneBridgePage>
+    with WidgetsBindingObserver {
   static const _hostKey = 'receiver_host';
   static const _portKey = 'receiver_port';
   static const _deepLinkChannel = MethodChannel('mobile_to_pc_input/deep_link');
   static const _keepScreenOnIdleTimeout = Duration(minutes: 10);
+  static const _sessionHandshakeTimeout = Duration(seconds: 2);
 
   final _hostController = TextEditingController();
   final _portController = TextEditingController(text: '8765');
@@ -83,6 +85,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   bool _isKeepScreenIdleTimedOut = false;
   bool _isTalkPressed = false;
   int? _activeTalkPointer;
+  int _talkSessionGeneration = 0;
   Timer? _keepScreenIdleTimer;
   double _level = 0;
   String _status = '未连接';
@@ -90,6 +93,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _deepLinkChannel.setMethodCallHandler(_handleDeepLinkCall);
     _hostController.addListener(_handleUserInput);
     _portController.addListener(_handleUserInput);
@@ -176,39 +180,119 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     });
     _syncKeepScreenOn();
 
+    Socket? connectingSocket;
     try {
       final socket = await Socket.connect(
         host,
         port,
       ).timeout(const Duration(seconds: 5));
+      connectingSocket = socket;
       socket.setOption(SocketOption.tcpNoDelay, true);
       await _socketSubscription?.cancel();
+      final sessionStatus = Completer<String>();
+      final decoder = AudioFrameDecoder();
+      var sessionAccepted = false;
+      _socket = socket;
       _socketSubscription = socket.listen(
-        (_) {},
+        (chunk) {
+          try {
+            for (final frame in decoder.add(chunk)) {
+              if (frame.type != 1) {
+                continue;
+              }
+
+              final message =
+                  jsonDecode(utf8.decode(frame.payload))
+                      as Map<String, dynamic>;
+              final type = message['type'] as String?;
+              if (type == 'session-accepted') {
+                sessionAccepted = true;
+                if (!sessionStatus.isCompleted) {
+                  sessionStatus.complete(type);
+                }
+              } else if (type == 'session-rejected' &&
+                  !sessionStatus.isCompleted) {
+                sessionStatus.complete(type);
+              }
+            }
+          } catch (error) {
+            if (!sessionStatus.isCompleted) {
+              sessionStatus.completeError(error);
+            }
+          }
+        },
         onError: (Object error) {
-          _handleSocketClosed('连接中断，正在重连...');
+          if (!sessionStatus.isCompleted) {
+            sessionStatus.completeError(error);
+          } else if (sessionAccepted) {
+            _handleSocketClosed(socket, '连接中断，正在重连...');
+          }
         },
         onDone: () {
-          _handleSocketClosed(_manualDisconnect ? '未连接' : '正在重连...');
+          if (!sessionStatus.isCompleted) {
+            sessionStatus.complete('session-closed');
+          } else if (sessionAccepted) {
+            _handleSocketClosed(socket, _manualDisconnect ? '未连接' : '正在重连...');
+          }
         },
         cancelOnError: true,
       );
 
+      final status = await sessionStatus.future.timeout(
+        _sessionHandshakeTimeout,
+      );
+      if (status == 'session-rejected') {
+        await _closeSocket(socket);
+        _setStatus('电脑已有其他手机连接');
+        if (!_manualDisconnect && !_isReconnecting) {
+          unawaited(_reconnect());
+        }
+        return;
+      }
+
+      if (status != 'session-accepted' ||
+          !sessionAccepted ||
+          !identical(_socket, socket)) {
+        throw const SocketException('电脑未确认语音会话连接');
+      }
+
       await _saveSettings();
       setState(() {
-        _socket = socket;
         _isConnected = true;
         _status = '已连接';
       });
       _syncKeepScreenOn();
     } catch (ex) {
       debugPrint('Connect failed: $ex');
+      if (connectingSocket != null) {
+        await _closeSocket(connectingSocket);
+      }
       _setStatus('连接失败');
     } finally {
       if (mounted) {
         setState(() => _isConnecting = false);
         _syncKeepScreenOn();
       }
+    }
+  }
+
+  Future<void> _closeSocket(Socket socket) async {
+    if (identical(_socket, socket)) {
+      _socket = null;
+      final subscription = _socketSubscription;
+      _socketSubscription = null;
+      await subscription?.cancel();
+    }
+
+    try {
+      await socket.close();
+    } catch (_) {
+      socket.destroy();
+    }
+    if (mounted) {
+      setState(() => _isConnected = false);
+    } else {
+      _isConnected = false;
     }
   }
 
@@ -231,11 +315,20 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     _syncKeepScreenOn();
   }
 
-  Future<void> _startRecording() async {
+  bool _isCurrentTalkSession(int generation) {
+    return generation == _talkSessionGeneration &&
+        _isTalkPressed &&
+        _activeTalkPointer != null &&
+        _isConnected &&
+        _socket != null;
+  }
+
+  Future<void> _startRecording(int generation) async {
     if (!_isConnected ||
         _socket == null ||
         _isRecording ||
-        _isStartingRecording) {
+        _isStartingRecording ||
+        !_isCurrentTalkSession(generation)) {
       return;
     }
 
@@ -250,7 +343,22 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         return;
       }
 
-      if (!_isTalkPressed) {
+      if (!_isCurrentTalkSession(generation)) {
+        return;
+      }
+
+      final sessionSender = AudioSessionSender(
+        sendStart: () => _sendControlMessage('asr-start'),
+        sendAudio: (bytes) => _sendFrame(2, bytes),
+      );
+      _audioSessionSender = sessionSender;
+      if (!sessionSender.start()) {
+        throw const SocketException('无法启动电脑端语音会话');
+      }
+      _isAsrSessionActive = true;
+      await _socket?.flush().timeout(const Duration(milliseconds: 800));
+
+      if (!_isCurrentTalkSession(generation)) {
         return;
       }
 
@@ -266,64 +374,56 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         ),
       );
 
-      final firstAudioChunk = Completer<void>();
-      final sessionSender = AudioSessionSender(
-        sendStart: () => _sendControlMessage('asr-start'),
-        sendAudio: (bytes) => _sendFrame(2, bytes),
-      );
-      _audioSessionSender = sessionSender;
+      if (!_isCurrentTalkSession(generation)) {
+        try {
+          await _recorder.stop().timeout(const Duration(milliseconds: 800));
+        } catch (_) {
+          // The matching stop flow still releases the PC bridge session.
+        }
+        return;
+      }
+
       _audioStreamDone = Completer<void>();
       _audioSubscription = stream.listen(
         (chunk) {
           sessionSender.addAudio(chunk);
-          if (!firstAudioChunk.isCompleted) {
-            firstAudioChunk.complete();
-          }
           final level = _calculateLevel(chunk);
           if (mounted) {
             setState(() => _level = level);
           }
         },
         onError: (Object error) {
-          if (!firstAudioChunk.isCompleted) {
-            firstAudioChunk.complete();
-          }
           _completeAudioStream();
           _setStatus('录音错误: $error');
           unawaited(_stopRecording());
         },
         onDone: () {
-          if (!firstAudioChunk.isCompleted) {
-            firstAudioChunk.complete();
-          }
           _completeAudioStream();
         },
         cancelOnError: true,
       );
 
-      try {
-        await firstAudioChunk.future.timeout(
-          const Duration(milliseconds: 250),
-        );
-      } on TimeoutException {
-        // Start the bridge even if a device is slow to publish its first chunk.
+      if (_isCurrentTalkSession(generation) && mounted) {
+        setState(() {
+          _isRecording = true;
+          _status = '正在发送语音';
+        });
       }
-
-      if (!sessionSender.start()) {
-        throw const SocketException('无法启动电脑端语音会话');
-      }
-      _isAsrSessionActive = true;
-
-      setState(() {
-        _isRecording = true;
-        _status = '正在发送语音';
-      });
     } catch (ex) {
-      _setStatus('启动录音失败: $ex');
+      if (_isCurrentTalkSession(generation)) {
+        _setStatus('启动录音失败: $ex');
+      }
       if (_isAsrSessionActive) {
         _sendControlMessage('asr-stop');
+        try {
+          await _socket?.flush().timeout(const Duration(milliseconds: 800));
+        } catch (_) {
+          // Socket shutdown will also release the desktop bridge session.
+        }
         _isAsrSessionActive = false;
       }
+      _audioSessionSender?.discard();
+      _audioSessionSender = null;
     } finally {
       _isStartingRecording = false;
       if (!recordingStartDone.isCompleted) {
@@ -363,8 +463,10 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
   }
 
-  void _handleSocketClosed(String status) {
-    if (!mounted || _socket == null || _isHandlingSocketClosed) {
+  void _handleSocketClosed(Socket closedSocket, String status) {
+    if (!mounted ||
+        !identical(_socket, closedSocket) ||
+        _isHandlingSocketClosed) {
       return;
     }
 
@@ -403,32 +505,44 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     try {
       socket.add(AudioTransport.buildFrame(type, payload));
     } catch (_) {
-      _handleSocketClosed('正在重连...');
+      _handleSocketClosed(socket, '正在重连...');
     }
   }
 
   Future<void> _stopRecording() async {
-    final recordingStartDone = _recordingStartDone;
-    if (_isStartingRecording && recordingStartDone != null) {
-      await recordingStartDone.future;
-    }
+    _activeTalkPointer = null;
+    _isTalkPressed = false;
+    _talkSessionGeneration++;
 
     if (_isStoppingRecording) {
       return;
     }
 
     _isStoppingRecording = true;
-    _activeTalkPointer = null;
-    _isTalkPressed = false;
-    unawaited(HapticFeedback.lightImpact());
+    final wasRecording = _isRecording;
+    _isRecording = false;
+    _level = 0;
+    if (mounted) {
+      setState(() {
+        _status = _isConnected ? '正在结束语音...' : '未连接';
+      });
+    }
 
-    if (!_isRecording && _audioSubscription == null && !_isAsrSessionActive) {
-      _isStoppingRecording = false;
-      return;
+    final recordingStartDone = _recordingStartDone;
+    if (_isStartingRecording && recordingStartDone != null) {
+      try {
+        await recordingStartDone.future.timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        try {
+          await _recorder.stop().timeout(const Duration(milliseconds: 800));
+        } catch (_) {
+          // Continue with bridge cleanup even if Android's recorder is stuck.
+        }
+      }
     }
 
     try {
-      if (_isRecording || _audioSubscription != null) {
+      if (wasRecording || _audioSubscription != null) {
         final subscription = _audioSubscription;
         final streamDone = _audioStreamDone?.future ?? Future<void>.value();
         await finishAudioStream(
@@ -442,6 +556,9 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
           flushSocket: () async {
             await _socket?.flush();
           },
+          onError: (error) {
+            debugPrint('Recording cleanup warning: $error');
+          },
         );
         _audioSubscription = null;
         _audioStreamDone = null;
@@ -449,21 +566,31 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
       if (_isAsrSessionActive) {
         _sendControlMessage('asr-stop');
-        await _socket?.flush();
+        try {
+          await _socket?.flush().timeout(const Duration(milliseconds: 800));
+        } catch (_) {
+          // A disconnected socket cannot retain the desktop hotkey.
+        }
         _isAsrSessionActive = false;
       }
+    } finally {
       _audioSessionSender?.discard();
       _audioSessionSender = null;
-
+      _audioSubscription = null;
+      _audioStreamDone = null;
+      _isAsrSessionActive = false;
+      _isRecording = false;
+      _level = 0;
+      _isStoppingRecording = false;
       if (mounted) {
         setState(() {
-          _isRecording = false;
-          _level = 0;
-          _status = _isConnected ? '已连接' : '未连接';
+          _status = _isConnected
+              ? '已连接'
+              : _isReconnecting
+              ? '正在重连...'
+              : '未连接';
         });
       }
-    } finally {
-      _isStoppingRecording = false;
     }
   }
 
@@ -484,8 +611,9 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
 
     _activeTalkPointer = event.pointer;
+    final generation = ++_talkSessionGeneration;
     setState(() => _isTalkPressed = true);
-    unawaited(_startRecording());
+    unawaited(_startRecording(generation));
   }
 
   void _handleTalkPointerEnd(PointerEvent event) {
@@ -495,8 +623,35 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
 
     _activeTalkPointer = null;
+    _talkSessionGeneration++;
     setState(() => _isTalkPressed = false);
+    unawaited(HapticFeedback.lightImpact());
     unawaited(_stopRecording());
+  }
+
+  void _forceEndTalkSession() {
+    if (!_isTalkPressed &&
+        !_isStartingRecording &&
+        !_isRecording &&
+        !_isAsrSessionActive) {
+      return;
+    }
+
+    _activeTalkPointer = null;
+    _talkSessionGeneration++;
+    if (mounted && _isTalkPressed) {
+      setState(() => _isTalkPressed = false);
+    } else {
+      _isTalkPressed = false;
+    }
+    unawaited(_stopRecording());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _forceEndTalkSession();
+    }
   }
 
   double _calculateLevel(Uint8List bytes) {
@@ -595,6 +750,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _keepScreenIdleTimer?.cancel();
     if (_isKeepScreenOn) {
       unawaited(
@@ -792,9 +948,9 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   Widget _buildTalkButton({required bool canTalk, required double size}) {
     return Listener(
       behavior: HitTestBehavior.opaque,
-      onPointerDown: canTalk ? _handleTalkPointerDown : null,
-      onPointerUp: canTalk ? _handleTalkPointerEnd : null,
-      onPointerCancel: canTalk ? _handleTalkPointerEnd : null,
+      onPointerDown: _handleTalkPointerDown,
+      onPointerUp: _handleTalkPointerEnd,
+      onPointerCancel: _handleTalkPointerEnd,
       child: Center(
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),

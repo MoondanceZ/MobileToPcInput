@@ -173,10 +173,7 @@ public partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() => StatusText.Text = $"音频输出失败: {ex.Message}");
             }
         };
-        _server.ControlMessageReceived += message =>
-        {
-            _ = HandleControlMessageAsync(message);
-        };
+        _server.ControlMessageReceived += HandleControlMessageAsync;
         _server.StatusChanged += message =>
         {
             Dispatcher.UIThread.Post(() => StatusText.Text = message);
