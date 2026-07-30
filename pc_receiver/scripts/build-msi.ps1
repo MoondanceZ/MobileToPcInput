@@ -8,9 +8,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+$repositoryRoot = Split-Path -Parent $root
 $project = Join-Path $root "pc_receiver.csproj"
 $installer = Join-Path $root "Installer\Product.wxs"
-$artifacts = Join-Path $root "artifacts"
+$releaseOutput = Join-Path $repositoryRoot "publish"
 $publishDir = Join-Path $root "bin\$Configuration\net10.0-windows\$Runtime\publish"
 
 function Get-ProjectVersion {
@@ -53,7 +54,7 @@ function Ensure-WixUiExtension {
 }
 
 $version = Get-ProjectVersion
-New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+New-Item -ItemType Directory -Force -Path $releaseOutput | Out-Null
 
 if (-not $SkipPublish) {
     Write-Host "Publishing MobileToPcInput framework-dependent single file ($Configuration, $Runtime)..."
@@ -95,10 +96,16 @@ if (Test-Path $legacyFunasrDir) {
 Ensure-Wix
 Ensure-WixUiExtension
 
-$msi = Join-Path $artifacts "MobileToPcInput-$version-x64.msi"
+$msi = Join-Path $releaseOutput "MobileToPcInput-$version-x64.msi"
+$msiPdb = [System.IO.Path]::ChangeExtension($msi, ".wixpdb")
+if (Test-Path -LiteralPath $msiPdb) {
+    Remove-Item -LiteralPath $msiPdb -Force
+}
+
 Write-Host "Building MSI: $msi"
 wix build $installer `
     -arch x64 `
+    -pdbtype none `
     -ext WixToolset.UI.wixext `
     -d "ProjectDir=$root" `
     -d "PublishDir=$publishDir" `

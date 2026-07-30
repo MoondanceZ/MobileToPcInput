@@ -9,9 +9,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+$repositoryRoot = Split-Path -Parent $root
 $bundleSource = Join-Path $root "Installer\Bundle.wxs"
 $buildMsiScript = Join-Path $root "scripts\build-msi.ps1"
 $artifacts = Join-Path $root "artifacts"
+$releaseOutput = Join-Path $repositoryRoot "publish"
 $dependencyCache = Join-Path $artifacts "dependencies"
 $bundleWork = Join-Path $root "obj\bundle"
 $vbCableDirectory = Join-Path $bundleWork "VBCABLE_Driver_Pack45"
@@ -87,7 +89,7 @@ function Resolve-VbCablePackage {
 }
 
 $version = Get-ProjectVersion
-New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+New-Item -ItemType Directory -Force -Path $releaseOutput | Out-Null
 
 if (-not $SkipMsiBuild) {
     & $buildMsiScript -Configuration $Configuration -Runtime $Runtime -WixVersion $WixVersion
@@ -96,7 +98,7 @@ if (-not $SkipMsiBuild) {
     }
 }
 
-$msi = Join-Path $artifacts "MobileToPcInput-$version-x64.msi"
+$msi = Join-Path $releaseOutput "MobileToPcInput-$version-x64.msi"
 if (-not (Test-Path -LiteralPath $msi)) {
     throw "Missing MSI package: $msi"
 }
@@ -105,10 +107,16 @@ Resolve-VbCablePackage
 Ensure-WixExtension "WixToolset.BootstrapperApplications.wixext"
 Ensure-WixExtension "WixToolset.Util.wixext"
 
-$setup = Join-Path $artifacts "MobileToPcInput-Setup-$version-x64.exe"
+$setup = Join-Path $releaseOutput "MobileToPcInput-Setup-$version-x64.exe"
+$setupPdb = [System.IO.Path]::ChangeExtension($setup, ".wixpdb")
+if (Test-Path -LiteralPath $setupPdb) {
+    Remove-Item -LiteralPath $setupPdb -Force
+}
+
 Write-Host "Building bundled setup: $setup"
 wix build $bundleSource `
     -arch x64 `
+    -pdbtype none `
     -ext WixToolset.BootstrapperApplications.wixext `
     -ext WixToolset.Util.wixext `
     -d "ProjectDir=$root" `

@@ -55,10 +55,12 @@ dotnet run
 PC 端框架依赖单文件发布和 MSI 打包：
 
 ```powershell
-cd D:\Workspace\Test\MobileToPcInput\pc_receiver
-dotnet publish .\pc_receiver.csproj -c Release -r win-x64 --self-contained false
-powershell -ExecutionPolicy Bypass -File .\scripts\build-msi.ps1
+cd D:\Workspace\Test\MobileToPcInput
+powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 ```
+
+该脚本会同时构建 Android Release APK 和 PC MSI，并检查两端版本号一致。
+最终文件统一输出到仓库根目录的 `publish` 文件夹。
 
 发布产物不包含 .NET 运行时。运行 PC 端前，目标电脑需要安装与项目版本匹配的
 `.NET 10 Runtime x64`。
@@ -73,8 +75,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-msi.ps1
   MobileToPcInput；安装完成后提示重启。
 
 ```powershell
-cd D:\Workspace\Test\MobileToPcInput\pc_receiver
-powershell -ExecutionPolicy Bypass -File .\scripts\build-setup.ps1
+cd D:\Workspace\Test\MobileToPcInput
+powershell -ExecutionPolicy Bypass -File .\pc_receiver\scripts\build-setup.ps1
 ```
 
 脚本会从 VB-Audio 官方地址下载 `VBCABLE_Driver_Pack45.zip`，校验固定的
@@ -88,8 +90,9 @@ VB-CABLE 是第三方 donationware 驱动。发布包含该驱动的安装程序
 安装包输出到：
 
 ```text
-D:\Workspace\Test\MobileToPcInput\pc_receiver\artifacts\MobileToPcInput-1.0.2-x64.msi
-D:\Workspace\Test\MobileToPcInput\pc_receiver\artifacts\MobileToPcInput-Setup-1.0.2-x64.exe
+D:\Workspace\Test\MobileToPcInput\publish\MobileToPcInput-Android-1.0.2.apk
+D:\Workspace\Test\MobileToPcInput\publish\MobileToPcInput-1.0.2-x64.msi
+D:\Workspace\Test\MobileToPcInput\publish\MobileToPcInput-Setup-1.0.2-x64.exe
 ```
 
 ```powershell
