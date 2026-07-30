@@ -13,7 +13,7 @@
       AllowSameVersionUpgrades="yes"
       DowngradeErrorMessage="已安装更新版本的 MobileToPcInput。" />
     <MediaTemplate EmbedCab="yes" />
-    <Icon Id="AppIcon.ico" SourceFile="$(var.ProjectDir)\Assets\app.ico" />
+    <Icon Id="AppIcon.ico" SourceFile="$(var.ProjectDir)\Assets\app-v3.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
     <Property Id="INSTALLFOLDER">
       <RegistrySearch

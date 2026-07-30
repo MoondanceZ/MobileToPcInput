@@ -8,7 +8,7 @@
     Version="$(var.ProductVersion)"
     UpgradeCode="f680d53c-000e-46a3-8986-2c0a023a3fdd"
     Compressed="yes"
-    IconSourceFile="$(var.ProjectDir)\Assets\app.ico">
+    IconSourceFile="$(var.ProjectDir)\Assets\app-v3.ico">
 
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication
