@@ -33,7 +33,7 @@ class MobileToPcInputApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '手机麦克风',
+      title: '手机语音输入',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff2f6fed)),
         useMaterial3: true,
@@ -616,7 +616,7 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
                     const Spacer(),
                     if (!isVeryCompact)
                       Text(
-                        _isConnected ? '正在使用电脑语音输入' : '连接电脑后启用语音输入',
+                        _isConnected ? '手机语音将发送到电脑当前输入方式' : '连接电脑后启用语音输入',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Color(0xff718096),

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -17,7 +18,16 @@ namespace pc_receiver;
 
 public partial class MainWindow : Window
 {
+    private static readonly RecognitionModeOption[] RecognitionModeOptions =
+    [
+        new(RecognitionModes.Local, "本地模型"),
+        new(RecognitionModes.Online, "在线服务"),
+        new(RecognitionModes.WeType, "桥接输入"),
+    ];
+
     private readonly AudioOutputService _audioOutput = new();
+    private readonly WeTypeHotkeyService _weTypeHotkey;
+    private readonly WeTypeBridgeSession _weTypeBridge;
     private readonly AudioReceiverServer _server = new();
     private readonly AsrSessionBuffer _asrBuffer = new();
     private readonly ParaformerAsrService _asrService = new();
@@ -35,7 +45,10 @@ public partial class MainWindow : Window
     private bool _isAsrReady;
     private bool _isModelOperationRunning;
     private bool _isRefreshingModels;
+    private bool _isRefreshingMode;
     private bool _isApplyingSelectedModel;
+    private bool _isCapturingHotkey;
+    private readonly List<string> _capturedHotkeyTokens = [];
     private AppSettings _settings = new();
     private string _modelOperationMessage = "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。";
     private double _modelOperationProgress;
@@ -57,6 +70,12 @@ public partial class MainWindow : Window
         ];
         Background = Brushes.Transparent;
         _settings = _settingsService.Load();
+        _settings.RecognitionMode = RecognitionModes.Normalize(_settings.RecognitionMode);
+        _weTypeHotkey = new WeTypeHotkeyService();
+        _weTypeHotkey.SetHotkey(
+            BridgeHotkeyDefinition.Parse(_settings.BridgeHotkey)
+                .ForSession(_settings.BridgeHotkeyEnabled));
+        _weTypeBridge = new WeTypeBridgeSession(_audioOutput, _weTypeHotkey);
         InitializeComponent();
         Surface.AddHandler(PointerPressedEvent, DragWindowFromTopArea, RoutingStrategies.Tunnel);
         TitleBar.AddHandler(PointerPressedEvent, DragWindow, RoutingStrategies.Tunnel);
@@ -64,12 +83,19 @@ public partial class MainWindow : Window
         PortBox.Text = IsValidPort(_settings.Port) ? _settings.Port.ToString() : "8765";
         var startupEnabled = _startupService.IsEnabled();
         StartupBox.IsChecked = startupEnabled;
-        ReplaceTrailingFullStopBox.IsChecked = _settings.ReplaceTrailingFullStopWithSpace;
+        BridgeHotkeyEnabledBox.IsChecked = _settings.BridgeHotkeyEnabled;
         _asrService.ReplaceTrailingFullStopWithSpaceEnabled = _settings.ReplaceTrailingFullStopWithSpace;
         _settings.StartupEnabled = startupEnabled;
         SaveSettings();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
-        ReplaceTrailingFullStopBox.Click += (_, _) => SetReplaceTrailingFullStopWithSpace(ReplaceTrailingFullStopBox.IsChecked == true);
+        BridgeHotkeyEnabledBox.Click += (_, _) =>
+            SetBridgeHotkeyEnabled(BridgeHotkeyEnabledBox.IsChecked == true);
+        HotkeyCaptureButton.Click += (_, _) => StartHotkeyCapture();
+        AddHandler(KeyDownEvent, CaptureHotkeyKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, CaptureHotkeyKeyUp, RoutingStrategies.Tunnel);
+        ModeBox.ItemsSource = RecognitionModeOptions;
+        RefreshRecognitionModePicker();
+        ModeBox.SelectionChanged += async (_, _) => await ApplyRecognitionModeAsync();
         DeviceBox.SelectionChanged += async (_, _) => await ApplySelectedModelAsync();
         PortBox.TextChanged += (_, _) =>
         {
@@ -110,7 +136,12 @@ public partial class MainWindow : Window
                 if (!connected)
                 {
                     LevelBar.Value = 0;
-                    if (_asrBuffer.IsRecording)
+                    if (IsWeTypeRecognitionSelected())
+                    {
+                        _weTypeBridge.Abort();
+                        UpdateHotkeyButtonsEnabled();
+                    }
+                    else if (_asrBuffer.IsRecording)
                     {
                         _ = FinishAsrSessionAsync();
                     }
@@ -121,7 +152,15 @@ public partial class MainWindow : Window
         {
             try
             {
-                _asrBuffer.AddSamples(bytes);
+                if (IsWeTypeRecognitionSelected())
+                {
+                    _weTypeBridge.AddAudio(bytes);
+                }
+                else
+                {
+                    _asrBuffer.AddSamples(bytes);
+                }
+
                 var level = AudioLevelMeter.CalculatePercent(bytes);
                 Dispatcher.UIThread.Post(() => LevelBar.Value = level);
             }
@@ -133,45 +172,96 @@ public partial class MainWindow : Window
         };
         _server.ControlMessageReceived += message =>
         {
-            try
-            {
-                using var document = JsonDocument.Parse(message);
-                if (document.RootElement.TryGetProperty("type", out var type)
-                    && IsStartControl(type.GetString()))
-                {
-                    if (!_isAsrReady)
-                    {
-                        AppLogger.Info($"ASR start rejected because worker is not ready. control={type.GetString()}");
-                        Dispatcher.UIThread.Post(() => StatusText.Text = "语音模型加载中，请稍后再说话");
-                        return;
-                    }
-
-                    AppLogger.Info($"ASR session started by control: {type.GetString()}");
-                    _asrBuffer.Start();
-                    Dispatcher.UIThread.Post(() => StatusText.Text = "正在录音，松开后识别");
-                }
-                else if (document.RootElement.TryGetProperty("type", out type)
-                    && IsStopControl(type.GetString()))
-                {
-                    if (!_asrBuffer.IsRecording)
-                    {
-                        AppLogger.Info($"ASR stop ignored because no recording session is active. control={type.GetString()}");
-                        return;
-                    }
-
-                    AppLogger.Info($"ASR session stopping by control: {type.GetString()}");
-                    _ = FinishAsrSessionAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                AppLogger.Error("Control message failed", ex);
-            }
+            _ = HandleControlMessageAsync(message);
         };
         _server.StatusChanged += message =>
         {
             Dispatcher.UIThread.Post(() => StatusText.Text = message);
         };
+    }
+
+    private async Task HandleControlMessageAsync(string message)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(message);
+            if (!document.RootElement.TryGetProperty("type", out var type))
+            {
+                return;
+            }
+
+            var control = type.GetString();
+            if (IsStartControl(control))
+            {
+                if (IsWeTypeRecognitionSelected())
+                {
+                    if (_isCapturingHotkey)
+                    {
+                        Dispatcher.UIThread.Post(
+                            () => StatusText.Text = "正在设置快捷键，请完成或按 Esc 取消");
+                        return;
+                    }
+
+                    await _weTypeBridge.StartAsync();
+                    AppLogger.Info($"WeType bridge session started by control: {control}");
+                    Dispatcher.UIThread.Post(() =>
+                    {
+                        StatusText.Text = _settings.BridgeHotkeyEnabled
+                            ? "正在调用输入法语音输入，松开后结束"
+                            : "正在桥接手机音频，松开后结束";
+                        UpdateHotkeyButtonsEnabled();
+                    });
+                    return;
+                }
+
+                if (!_isAsrReady)
+                {
+                    AppLogger.Info($"ASR start rejected because worker is not ready. control={control}");
+                    Dispatcher.UIThread.Post(() => StatusText.Text = "语音模型加载中，请稍后再说话");
+                    return;
+                }
+
+                AppLogger.Info($"ASR session started by control: {control}");
+                _asrBuffer.Start();
+                Dispatcher.UIThread.Post(() => StatusText.Text = "正在录音，松开后识别");
+                return;
+            }
+
+            if (!IsStopControl(control))
+            {
+                return;
+            }
+
+            if (IsWeTypeRecognitionSelected())
+            {
+                await _weTypeBridge.StopAsync();
+                AppLogger.Info($"WeType bridge session stopped by control: {control}");
+                Dispatcher.UIThread.Post(() =>
+                {
+                    StatusText.Text = _settings.BridgeHotkeyEnabled
+                        ? "输入法语音输入已结束"
+                        : "手机音频桥接已结束";
+                    LevelBar.Value = 0;
+                    UpdateHotkeyButtonsEnabled();
+                });
+                return;
+            }
+
+            if (!_asrBuffer.IsRecording)
+            {
+                AppLogger.Info($"ASR stop ignored because no recording session is active. control={control}");
+                return;
+            }
+
+            AppLogger.Info($"ASR session stopping by control: {control}");
+            await FinishAsrSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            _weTypeBridge.Abort();
+            AppLogger.Error("Control message failed", ex);
+            Dispatcher.UIThread.Post(() => StatusText.Text = $"语音控制失败: {ex.Message}");
+        }
     }
 
     private async void StartButton_Click(object? sender, RoutedEventArgs e)
@@ -198,15 +288,28 @@ public partial class MainWindow : Window
             StartButton.IsEnabled = false;
             StopButton.IsEnabled = true;
             PortBox.IsEnabled = false;
+            ModeBox.IsEnabled = false;
             DeviceBox.IsEnabled = false;
-            ManageModelButton.IsEnabled = true;
+            ManageModelButton.IsEnabled = !IsWeTypeRecognitionSelected();
+            UpdateHotkeyButtonsEnabled();
             SetStatus($"● 正在监听 0.0.0.0:{port}", "#1769E0", "#EEF6FF");
             SyncListeningUi(isListening: true);
         }
         catch (Exception ex)
         {
+            if (IsWeTypeRecognitionSelected())
+            {
+                _weTypeBridge.Abort();
+                _audioOutput.Stop();
+            }
+
             SetStatus($"● 启动失败: {ex.Message}", "#C13830", "#FFF1F0");
             SyncListeningUi(isListening: false);
+            PortBox.IsEnabled = true;
+            ModeBox.IsEnabled = true;
+            DeviceBox.IsEnabled = true;
+            ManageModelButton.IsEnabled = !IsWeTypeRecognitionSelected();
+            UpdateHotkeyButtonsEnabled();
         }
     }
 
@@ -227,14 +330,28 @@ public partial class MainWindow : Window
         try
         {
             DeviceBox.ItemsSource = null;
-            DeviceBox.ItemsSource = IsOnlineRecognitionSelected()
-                ? new object[] { OnlineAsrCatalog.DefaultService }
-                : AsrModelCatalog.Models.Cast<object>().ToArray();
-            DeviceBox.SelectedItem = IsOnlineRecognitionSelected()
-                ? OnlineAsrCatalog.DefaultService
-                : AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
-                    ?? AsrModelCatalog.DefaultModel;
-            HintText.Text = "当前使用本机离线语音识别；模型可在“模型管理”中维护。";
+            if (IsWeTypeRecognitionSelected())
+            {
+                var devices = _audioOutput.GetDevices().Where(item => item.IsLikelyVirtualCable).ToArray();
+                DeviceBox.ItemsSource = devices;
+                DeviceBox.SelectedItem = devices.FirstOrDefault(
+                    item => string.Equals(
+                        item.Name,
+                        _settings.WeTypeOutputDeviceName,
+                        StringComparison.OrdinalIgnoreCase))
+                    ?? devices.FirstOrDefault();
+            }
+            else
+            {
+                DeviceBox.ItemsSource = IsOnlineRecognitionSelected()
+                    ? new object[] { OnlineAsrCatalog.DefaultService }
+                    : AsrModelCatalog.Models.Cast<object>().ToArray();
+                DeviceBox.SelectedItem = IsOnlineRecognitionSelected()
+                    ? OnlineAsrCatalog.DefaultService
+                    : AsrModelCatalog.Models.FirstOrDefault(model => model.Id == selectedId)
+                        ?? AsrModelCatalog.DefaultModel;
+            }
+
             UpdateModelUi();
         }
         finally
@@ -246,10 +363,14 @@ public partial class MainWindow : Window
     private void StopServer()
     {
         _server.Stop();
+        _weTypeBridge.Abort();
+        _audioOutput.Stop();
         SyncListeningUi(isListening: false);
         PortBox.IsEnabled = true;
+        ModeBox.IsEnabled = true;
         DeviceBox.IsEnabled = true;
-        ManageModelButton.IsEnabled = true;
+        ManageModelButton.IsEnabled = !IsWeTypeRecognitionSelected();
+        UpdateHotkeyButtonsEnabled();
         UpdateModelUi();
         SetStatus("● 未监听", "#C13830", "#FFF1F0");
         ClientText.Text = "手机未连接";
@@ -505,6 +626,51 @@ public partial class MainWindow : Window
 
     private void UpdateModelUi()
     {
+        if (IsWeTypeRecognitionSelected())
+        {
+            ModelLabel.Text = "桥接输出";
+            TitleSubtitleText.Text = "手机麦克风接收器 · 桥接输入";
+            var hotkey = BridgeHotkeyDefinition.Parse(_settings.BridgeHotkey);
+            UsageText.Text = _settings.BridgeHotkeyEnabled
+                ? $"使用流程：将 CABLE Output 设为 Windows 默认麦克风；输入法按住说话快捷键设为 {hotkey.DisplayName}；手机连接后按住说话。"
+                : "使用流程：将 CABLE Output 设为 Windows 默认麦克风；当前未启用自动按键，手机按住说话时仅转发音频。";
+            ClearAudioCacheButton.IsVisible = false;
+            ManageModelButton.IsEnabled = false;
+            BridgeHotkeySettingsCard.IsVisible = true;
+            BridgeHotkeyEnabledBox.IsChecked = _settings.BridgeHotkeyEnabled;
+            UpdateHotkeyButtonsEnabled();
+            if (!_isCapturingHotkey)
+            {
+                HotkeyCaptureButton.Content = hotkey.DisplayName;
+                HotkeyCaptureHint.Text = "点击右侧按键，可录入一个或多个按键；Esc 取消";
+            }
+
+            var device = DeviceBox.SelectedItem as AudioOutputDevice;
+            if (device is null)
+            {
+                HintText.Text = "未检测到 VB-CABLE 的 CABLE Input，请先安装或启用虚拟音频设备。";
+                return;
+            }
+
+            var defaultCapture = _audioOutput.GetDefaultCaptureDeviceName();
+            HintText.Text = !IsCableOutputCapture(defaultCapture)
+                ? $"已选择 {device.Name}；请先把 CABLE Output 设为 Windows 默认录音设备。"
+                : _settings.BridgeHotkeyEnabled
+                    ? $"桥接输出：{device.Name}。按住手机按钮会触发快捷键 {hotkey.DisplayName}。"
+                    : $"桥接输出：{device.Name}。自动按键已关闭，仅转发手机音频。";
+            return;
+        }
+
+        CancelHotkeyCapture();
+        ModelLabel.Text = "语音模型";
+        TitleSubtitleText.Text = IsOnlineRecognitionSelected()
+            ? "手机麦克风接收器 · 在线语音识别"
+            : "手机麦克风接收器 · 本地语音识别";
+        UsageText.Text = "使用流程：电脑端开始监听；手机连接后按住说话，松开后完成识别，并把文本直接输入到当前输入框。";
+        ClearAudioCacheButton.IsVisible = true;
+        ManageModelButton.IsEnabled = true;
+        BridgeHotkeySettingsCard.IsVisible = false;
+
         if (IsOnlineRecognitionSelected())
         {
             HintText.Text = $"当前使用：{OnlineAsrCatalog.DefaultService.DisplayName} · {GetLanguageDisplayName(_settings.XiaomiMimoLanguage)}。";
@@ -532,6 +698,18 @@ public partial class MainWindow : Window
     {
         if (_isRefreshingModels || _isApplyingSelectedModel)
         {
+            UpdateModelUi();
+            return;
+        }
+
+        if (IsWeTypeRecognitionSelected())
+        {
+            if (DeviceBox.SelectedItem is AudioOutputDevice outputDevice)
+            {
+                _settings.WeTypeOutputDeviceName = outputDevice.Name;
+                SaveSettings();
+            }
+
             UpdateModelUi();
             return;
         }
@@ -578,6 +756,38 @@ public partial class MainWindow : Window
 
     private async Task<bool> EnsureSelectedModelReadyAsync()
     {
+        if (IsWeTypeRecognitionSelected())
+        {
+            var device = DeviceBox.SelectedItem as AudioOutputDevice
+                ?? _audioOutput.FindDevice(_settings.WeTypeOutputDeviceName);
+            if (device is null)
+            {
+                StatusText.Text = "未检测到 CABLE Input，请先安装或启用 VB-CABLE";
+                return false;
+            }
+
+            var defaultCapture = _audioOutput.GetDefaultCaptureDeviceName();
+            if (!IsCableOutputCapture(defaultCapture))
+            {
+                StatusText.Text = "请先把 CABLE Output 设为 Windows 默认录音设备";
+                return false;
+            }
+
+            try
+            {
+                _audioOutput.Start(device.DeviceNumber);
+                _settings.WeTypeOutputDeviceName = device.Name;
+                SaveSettings();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("WeType virtual audio output failed to start", ex);
+                StatusText.Text = $"虚拟音频输出启动失败: {ex.Message}";
+                return false;
+            }
+        }
+
         if (IsOnlineRecognitionSelected())
         {
             if (string.IsNullOrWhiteSpace(_settings.XiaomiMimoApiKey))
@@ -695,14 +905,6 @@ public partial class MainWindow : Window
             _settings.StartupEnabled = actual;
             SaveSettings();
         }
-    }
-
-    private void SetReplaceTrailingFullStopWithSpace(bool enabled)
-    {
-        ReplaceTrailingFullStopBox.IsChecked = enabled;
-        _asrService.ReplaceTrailingFullStopWithSpaceEnabled = enabled;
-        _settings.ReplaceTrailingFullStopWithSpace = enabled;
-        SaveSettings();
     }
 
     private void SyncListeningUi(bool isListening)
@@ -846,6 +1048,14 @@ public partial class MainWindow : Window
 
     private async Task WarmUpAsrOnStartupAsync()
     {
+        if (IsWeTypeRecognitionSelected())
+        {
+            _isAsrReady = true;
+            RefreshModels();
+            await StartListeningAsync();
+            return;
+        }
+
         if (IsOnlineRecognitionSelected())
         {
             if (string.IsNullOrWhiteSpace(_settings.XiaomiMimoApiKey))
@@ -936,7 +1146,7 @@ public partial class MainWindow : Window
 
     private void SaveSelectedModelSetting(AsrModelOption model)
     {
-        _settings.RecognitionMode = "local";
+        _settings.RecognitionMode = RecognitionModes.Local;
         _settings.SelectedModelId = model.Id;
         SaveSettings();
     }
@@ -959,7 +1169,7 @@ public partial class MainWindow : Window
         SaveXiaomiSettings(apiKey, language);
         if (useOnlineService)
         {
-            _settings.RecognitionMode = "online";
+            _settings.RecognitionMode = RecognitionModes.Online;
             _settings.SelectedOnlineServiceId = OnlineAsrCatalog.XiaomiMimoServiceId;
             SaveSettings();
             await _asrService.StopWorkerAsync();
@@ -969,11 +1179,12 @@ public partial class MainWindow : Window
                 _isAsrReady ? "#1769E0" : "#C13830",
                 _isAsrReady ? "#EEF6FF" : "#FFF1F0");
             RefreshModels();
+            RefreshRecognitionModePicker();
             UpdateModelUi();
             return;
         }
 
-        _settings.RecognitionMode = "local";
+        _settings.RecognitionMode = RecognitionModes.Local;
         var model = GetSelectedLocalModel() ?? AsrModelCatalog.DefaultModel;
         if (!model.IsSupported)
         {
@@ -988,6 +1199,7 @@ public partial class MainWindow : Window
         await WarmUpAsrAsync(model, startListeningWhenReady: true);
         SaveSelectedModelSetting(model);
         RefreshModels();
+        RefreshRecognitionModePicker();
         UpdateModelUi();
     }
 
@@ -998,8 +1210,205 @@ public partial class MainWindow : Window
 
     private bool IsOnlineRecognitionSelected()
     {
-        return string.Equals(_settings.RecognitionMode, "online", StringComparison.OrdinalIgnoreCase)
+        return string.Equals(_settings.RecognitionMode, RecognitionModes.Online, StringComparison.OrdinalIgnoreCase)
             && string.Equals(_settings.SelectedOnlineServiceId, OnlineAsrCatalog.XiaomiMimoServiceId, StringComparison.Ordinal);
+    }
+
+    private bool IsWeTypeRecognitionSelected()
+    {
+        return string.Equals(_settings.RecognitionMode, RecognitionModes.WeType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsCableOutputCapture(string? deviceName)
+    {
+        return !string.IsNullOrWhiteSpace(deviceName)
+            && deviceName.Contains("CABLE Output", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void StartHotkeyCapture()
+    {
+        if (!IsWeTypeRecognitionSelected() || _weTypeBridge.IsActive)
+        {
+            return;
+        }
+
+        _capturedHotkeyTokens.Clear();
+        _isCapturingHotkey = true;
+        HotkeyCaptureButton.Content = "请同时按键…";
+        HotkeyCaptureHint.Text = "正在录制：按下一个或多个按键；Esc 取消";
+        UpdateHotkeyButtonsEnabled();
+        HotkeyCaptureButton.Focus();
+    }
+
+    private void CaptureHotkeyKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (!_isCapturingHotkey)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            CancelHotkeyCapture();
+            e.Handled = true;
+            return;
+        }
+
+        var eventToken = BridgeHotkeyDefinition.TryGetToken(e.Key, out var token)
+            ? token
+            : null;
+        var pressedTokens = BridgeHotkeyCapture.ResolveKeyDownTokens(
+            BridgeHotkeyCapture.GetPressedTokens(),
+            eventToken);
+        foreach (var pressedToken in pressedTokens)
+        {
+            if (!_capturedHotkeyTokens.Contains(pressedToken, StringComparer.OrdinalIgnoreCase))
+            {
+                _capturedHotkeyTokens.Add(pressedToken);
+            }
+        }
+
+        HotkeyCaptureButton.Content = string.Join(" + ", _capturedHotkeyTokens);
+        HotkeyCaptureHint.Text = _capturedHotkeyTokens.Count >= 1
+            ? "松开任意按键即可保存"
+            : "请按下一个受支持的按键";
+        e.Handled = true;
+    }
+
+    private void CaptureHotkeyKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (!_isCapturingHotkey)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (!BridgeHotkeyDefinition.TryCreate(_capturedHotkeyTokens, out var hotkey))
+        {
+            CancelHotkeyCapture();
+            SetStatus("● 快捷键至少需要一个受支持的按键", "#C13830", "#FFF1F0");
+            return;
+        }
+
+        _settings.BridgeHotkey = hotkey.SerializedValue;
+        _weTypeHotkey.SetHotkey(hotkey.ForSession(_settings.BridgeHotkeyEnabled));
+        SaveSettings();
+        _isCapturingHotkey = false;
+        _capturedHotkeyTokens.Clear();
+        HotkeyCaptureButton.Content = hotkey.DisplayName;
+        HotkeyCaptureHint.Text = "点击右侧按键，可录入一个或多个按键；Esc 取消";
+        SetStatus($"● 已保存按住说话快捷键：{hotkey.DisplayName}", "#1769E0", "#EEF6FF");
+        UpdateModelUi();
+    }
+
+    private void SetBridgeHotkeyEnabled(bool enabled)
+    {
+        if (_weTypeBridge.IsActive)
+        {
+            BridgeHotkeyEnabledBox.IsChecked = _settings.BridgeHotkeyEnabled;
+            return;
+        }
+
+        CancelHotkeyCapture();
+        _settings.BridgeHotkeyEnabled = enabled;
+        var configuredHotkey = BridgeHotkeyDefinition.Parse(_settings.BridgeHotkey);
+        _weTypeHotkey.SetHotkey(configuredHotkey.ForSession(enabled));
+        SaveSettings();
+        SetStatus(
+            enabled
+                ? $"● 已启用按住说话快捷键：{configuredHotkey.DisplayName}"
+                : "● 已关闭自动按键，桥接时仅转发音频",
+            "#1769E0",
+            "#EEF6FF");
+        UpdateModelUi();
+    }
+
+    private void UpdateHotkeyButtonsEnabled()
+    {
+        var canEdit = IsWeTypeRecognitionSelected() && !_weTypeBridge.IsActive;
+        HotkeyCaptureButton.IsEnabled = canEdit;
+        BridgeHotkeyEnabledBox.IsEnabled = canEdit && !_isCapturingHotkey;
+    }
+
+    private void CancelHotkeyCapture()
+    {
+        if (!_isCapturingHotkey)
+        {
+            return;
+        }
+
+        _isCapturingHotkey = false;
+        _capturedHotkeyTokens.Clear();
+        HotkeyCaptureButton.Content = BridgeHotkeyDefinition.Parse(_settings.BridgeHotkey).DisplayName;
+        HotkeyCaptureHint.Text = "点击右侧按键，可录入一个或多个按键；Esc 取消";
+        UpdateHotkeyButtonsEnabled();
+    }
+
+    private void RefreshRecognitionModePicker()
+    {
+        _isRefreshingMode = true;
+        try
+        {
+            ModeBox.SelectedItem = RecognitionModeOptions.First(
+                item => item.Id == RecognitionModes.Normalize(_settings.RecognitionMode));
+        }
+        finally
+        {
+            _isRefreshingMode = false;
+        }
+    }
+
+    private async Task ApplyRecognitionModeAsync()
+    {
+        if (_isRefreshingMode || ModeBox.SelectedItem is not RecognitionModeOption option)
+        {
+            return;
+        }
+
+        var nextMode = RecognitionModes.Normalize(option.Id);
+        if (nextMode == RecognitionModes.Normalize(_settings.RecognitionMode))
+        {
+            UpdateModelUi();
+            return;
+        }
+
+        _weTypeBridge.Abort();
+        _audioOutput.Stop();
+        _settings.RecognitionMode = nextMode;
+        SaveSettings();
+
+        if (nextMode == RecognitionModes.WeType)
+        {
+            await _asrService.StopWorkerAsync();
+            _isAsrReady = true;
+            SetStatus("● 桥接输入已启用", "#1769E0", "#EEF6FF");
+        }
+        else if (nextMode == RecognitionModes.Online)
+        {
+            await _asrService.StopWorkerAsync();
+            _isAsrReady = !string.IsNullOrWhiteSpace(_settings.XiaomiMimoApiKey);
+            SetStatus(
+                _isAsrReady ? "● 在线服务已启用" : "● 请先配置在线服务",
+                _isAsrReady ? "#1769E0" : "#C13830",
+                _isAsrReady ? "#EEF6FF" : "#FFF1F0");
+        }
+        else
+        {
+            var model = AsrModelCatalog.Models.FirstOrDefault(
+                item => item.Id == _settings.SelectedModelId)
+                ?? AsrModelCatalog.DefaultModel;
+            _isAsrReady = false;
+            if (model.IsSupported && model.IsDownloaded)
+            {
+                await WarmUpAsrAsync(model);
+            }
+            else
+            {
+                SetStatus("● 本地模型未就绪", "#C13830", "#FFF1F0");
+            }
+        }
+
+        RefreshModels();
     }
 
     private async Task<string> RecognizeOnlineAsync(string wavPath)
@@ -1252,6 +1661,8 @@ public partial class MainWindow : Window
     {
         StopServer();
         _server.Dispose();
+        _weTypeBridge.Dispose();
+        _weTypeHotkey.Dispose();
         _audioOutput.Dispose();
         _asrService.Dispose();
         _trayIcon.Dispose();

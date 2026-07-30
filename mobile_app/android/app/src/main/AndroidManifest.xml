@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <application
-        android:label="手机麦克风"
+        android:label="手机语音输入"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

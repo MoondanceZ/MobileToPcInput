@@ -17,6 +17,7 @@ public sealed class AudioReceiverServer : IDisposable
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _acceptTask;
+    private readonly SemaphoreSlim _clientGate = new(1, 1);
 
     public event Action<byte[]>? AudioFrameReceived;
     public event Action<string>? ControlMessageReceived;
@@ -54,10 +55,27 @@ public sealed class AudioReceiverServer : IDisposable
             try
             {
                 var client = await _listener.AcceptTcpClientAsync(token);
-                client.NoDelay = true;
-                client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-                AppLogger.Info($"Accepted TCP client {client.Client.RemoteEndPoint}");
-                _ = Task.Run(() => HandleClientAsync(client, token), token);
+                if (!_clientGate.Wait(0))
+                {
+                    AppLogger.Info($"Rejected additional TCP client {client.Client.RemoteEndPoint}");
+                    client.Dispose();
+                    StatusChanged?.Invoke("已有手机连接，已拒绝其他连接");
+                    continue;
+                }
+
+                try
+                {
+                    client.NoDelay = true;
+                    client.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                    AppLogger.Info($"Accepted TCP client {client.Client.RemoteEndPoint}");
+                    _ = Task.Run(() => HandleClientAsync(client, token));
+                }
+                catch
+                {
+                    client.Dispose();
+                    _clientGate.Release();
+                    throw;
+                }
             }
             catch (OperationCanceledException)
             {
@@ -149,6 +167,7 @@ public sealed class AudioReceiverServer : IDisposable
             AppLogger.Info(
                 $"TCP client disconnected. controls={controlFrames}, audioFrames={audioFrames}, audioBytes={audioBytes}");
             ClientStateChanged?.Invoke(false);
+            _clientGate.Release();
         }
     }
 

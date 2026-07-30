@@ -10,6 +10,27 @@
         Background="Transparent"
         Title="MobileToPcInput">
   <Window.Resources>
+    <DataTemplate x:Key="SelectedModeTemplate"
+                  x:DataType="local:RecognitionModeOption">
+      <TextBlock Text="{Binding DisplayName}"
+                 FontSize="13"
+                 Foreground="#1F334D"
+                 TextTrimming="CharacterEllipsis"
+                 VerticalAlignment="Center" />
+    </DataTemplate>
+
+    <DataTemplate x:Key="ModeDropDownItemTemplate"
+                  x:DataType="local:RecognitionModeOption">
+      <Border Width="{Binding #ModeBox.Bounds.Width}"
+              MinHeight="42"
+              Padding="14,9">
+        <TextBlock Text="{Binding DisplayName}"
+                   FontSize="13"
+                   Foreground="#1C2739"
+                   VerticalAlignment="Center" />
+      </Border>
+    </DataTemplate>
+
     <DataTemplate x:Key="SelectedModelTemplate"
                   x:DataType="local:AsrModelOption">
       <TextBlock Text="{Binding DisplayName}"
@@ -43,6 +64,32 @@
   </Window.Resources>
 
   <Window.Styles>
+    <Style Selector="ComboBox#ModeBox">
+      <Setter Property="Padding" Value="16,0,12,0" />
+      <Setter Property="Foreground" Value="#1F334D" />
+      <Setter Property="BorderBrush" Value="#D6E0EC" />
+      <Setter Property="Background" Value="White" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="MaxDropDownHeight" Value="220" />
+    </Style>
+    <Style Selector="ComboBox#ModeBox:pointerover">
+      <Setter Property="BorderBrush" Value="#AFC3DD" />
+      <Setter Property="Background" Value="#FBFDFF" />
+    </Style>
+    <Style Selector="ComboBox#ModeBox:focus">
+      <Setter Property="BorderBrush" Value="#1769E0" />
+    </Style>
+    <Style Selector="ComboBox#ModeBox /template/ Popup#PART_Popup">
+      <Setter Property="Width" Value="{Binding #ModeBox.Bounds.Width}" />
+    </Style>
+    <Style Selector="ComboBox#ModeBox /template/ Popup#PART_Popup Border">
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="BorderBrush" Value="#D8E1EC" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Background" Value="#FAFCFF" />
+      <Setter Property="BoxShadow" Value="0 10 22 0 #1A273B30" />
+    </Style>
     <Style Selector="ComboBox#DeviceBox">
       <Setter Property="Padding" Value="12,0,10,0" />
       <Setter Property="Foreground" Value="#1F334D" />
@@ -122,7 +169,8 @@
                      FontSize="22"
                      FontWeight="SemiBold"
                      Foreground="#1C2739" />
-          <TextBlock Text="手机麦克风接收器 · 本地语音识别"
+          <TextBlock x:Name="TitleSubtitleText"
+                     Text="手机麦克风接收器 · 本地语音识别"
                      FontSize="12"
                      Foreground="#718096" />
         </StackPanel>
@@ -223,15 +271,31 @@
               </Grid>
             </Border>
 
-            <Grid ColumnDefinitions="108,*" RowDefinitions="Auto,Auto" RowSpacing="12">
+            <Grid ColumnDefinitions="108,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="12">
               <TextBlock Grid.Row="0"
+                         Grid.Column="0"
+                         VerticalAlignment="Center"
+                         Text="识别方式"
+                         Foreground="#536174"
+                         FontWeight="SemiBold" />
+              <ComboBox x:Name="ModeBox"
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        MinHeight="38"
+                        CornerRadius="9"
+                        BorderBrush="#D6E0EC"
+                        Background="White"
+                        ItemTemplate="{StaticResource ModeDropDownItemTemplate}"
+                        SelectionBoxItemTemplate="{StaticResource SelectedModeTemplate}" />
+
+              <TextBlock Grid.Row="1"
                          Grid.Column="0"
                          VerticalAlignment="Center"
                          Text="监听端口"
                          Foreground="#536174"
                          FontWeight="SemiBold" />
               <TextBox x:Name="PortBox"
-                       Grid.Row="0"
+                       Grid.Row="1"
                       Grid.Column="1"
                       Height="38"
                       Text="8765"
@@ -242,14 +306,15 @@
                       VerticalContentAlignment="Center"
                       Padding="10,0" />
 
-              <TextBlock Grid.Row="1"
+              <TextBlock x:Name="ModelLabel"
+                         Grid.Row="2"
                          Grid.Column="0"
                          VerticalAlignment="Center"
                          Text="语音模型"
                          Foreground="#536174"
                          FontWeight="SemiBold" />
               <ComboBox x:Name="DeviceBox"
-                        Grid.Row="1"
+                        Grid.Row="2"
                         Grid.Column="1"
                         MinHeight="38"
                         CornerRadius="9"
@@ -381,7 +446,8 @@
                 BorderBrush="#D8E1EC"
                 BorderThickness="1">
           <StackPanel Spacing="8">
-            <Border CornerRadius="10"
+            <Border x:Name="StartupSettingsCard"
+                    CornerRadius="10"
                     Background="White"
                     BorderBrush="#DDE6F1"
                     BorderThickness="1"
@@ -392,18 +458,57 @@
                         Foreground="#1F334D"
                         Content="开机自动启动 MobileToPcInput" />
             </Border>
-            <Border CornerRadius="10"
+            <Border x:Name="BridgeHotkeySettingsCard"
+                    IsVisible="False"
+                    CornerRadius="12"
                     Background="White"
                     BorderBrush="#DDE6F1"
                     BorderThickness="1"
-                    Padding="8,5">
-              <CheckBox x:Name="ReplaceTrailingFullStopBox"
-                        VerticalAlignment="Center"
+                    Padding="14,12">
+              <Grid ColumnDefinitions="*,Auto"
+                    RowDefinitions="Auto,Auto">
+                <StackPanel Grid.Row="0"
+                            Grid.Column="0"
+                            Spacing="3"
+                            VerticalAlignment="Center">
+                  <CheckBox x:Name="BridgeHotkeyEnabledBox"
+                            FontSize="14"
+                            FontWeight="SemiBold"
+                            Foreground="#1F334D"
+                            Content="按住说话快捷键" />
+                  <TextBlock Text="手机按下时同时按住"
+                             FontSize="11"
+                             Foreground="#718096" />
+                </StackPanel>
+                <Button x:Name="HotkeyCaptureButton"
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        MinWidth="128"
+                        MinHeight="42"
+                        Margin="12,0,0,0"
+                        Padding="14,8"
+                        Background="#EEF6FF"
+                        Foreground="#1769E0"
+                        BorderBrush="#BFD4F2"
+                        BorderThickness="1"
+                        CornerRadius="10"
                         FontSize="13"
-                        Foreground="#1F334D"
-                        Content="句末句号改为空格" />
+                        FontWeight="SemiBold"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        Content="Ctrl + Win" />
+                <TextBlock x:Name="HotkeyCaptureHint"
+                           Grid.Row="1"
+                           Grid.ColumnSpan="2"
+                           Margin="0,9,0,0"
+                           Text="点击右侧按键，可录入一个或多个按键；Esc 取消"
+                           FontSize="11"
+                           Foreground="#718096"
+                           TextWrapping="Wrap" />
+              </Grid>
             </Border>
-            <Button MinHeight="38"
+            <Button x:Name="ClearAudioCacheButton"
+                    MinHeight="38"
                     Padding="14,8"
                     Click="ClearAudioCacheButton_Click"
                     Content="清理语音缓存"
@@ -428,7 +533,8 @@
                 BorderBrush="#E1E8F0"
                 BorderThickness="1"
                 Padding="14,10">
-          <TextBlock Text="使用流程：电脑端开始监听；手机连接后按住说话，松开后由本机 Paraformer 识别，并把文本直接输入到当前输入框。"
+          <TextBlock x:Name="UsageText"
+                     Text="使用流程：电脑端开始监听；手机连接后按住说话，松开后由本机 Paraformer 识别，并把文本直接输入到当前输入框。"
                      FontSize="13"
                      Foreground="#536174"
                      TextWrapping="Wrap" />

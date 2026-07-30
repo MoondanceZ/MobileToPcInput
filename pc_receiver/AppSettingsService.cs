@@ -27,7 +27,20 @@ public sealed class AppSettingsService
             }
 
             var json = File.ReadAllText(SettingsPath);
-            return JsonSerializer.Deserialize(json, JsonContext.AppSettings) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize(json, JsonContext.AppSettings) ?? new AppSettings();
+            settings.RecognitionMode = RecognitionModes.Normalize(settings.RecognitionMode);
+            if (string.IsNullOrWhiteSpace(settings.BridgeHotkey))
+            {
+                settings.BridgeHotkey = BridgeHotkeyDefinition.Default.SerializedValue;
+                settings.BridgeHotkeyEnabled = false;
+            }
+            else
+            {
+                settings.BridgeHotkey =
+                    BridgeHotkeyDefinition.Parse(settings.BridgeHotkey).SerializedValue;
+            }
+
+            return settings;
         }
         catch (Exception ex)
         {
