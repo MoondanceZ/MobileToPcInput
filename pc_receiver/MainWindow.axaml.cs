@@ -358,7 +358,9 @@ public partial class MainWindow : Window
             DeviceBox.ItemsSource = null;
             if (IsWeTypeRecognitionSelected())
             {
-                var devices = _audioOutput.GetDevices().Where(item => item.IsLikelyVirtualCable).ToArray();
+                var devices = _audioOutput.GetDevices()
+                    .Where(item => item.IsLikelyVirtualCable)
+                    .ToArray();
                 DeviceBox.ItemsSource = devices;
                 DeviceBox.SelectedItem = devices.FirstOrDefault(
                     item => string.Equals(
@@ -678,6 +680,11 @@ public partial class MainWindow : Window
             }
 
             var device = DeviceBox.SelectedItem as AudioOutputDevice;
+            DeviceBox.PlaceholderText = device is null
+                ? "未检测到桥接设备"
+                : "请选择桥接输出";
+            DeviceBox.IsHitTestVisible = device is not null;
+            DeviceBox.Focusable = device is not null;
             if (device is null)
             {
                 HintText.Text = "未检测到 VB-CABLE 的 CABLE Input，请先安装或启用虚拟音频设备。";
@@ -694,6 +701,11 @@ public partial class MainWindow : Window
         }
 
         CancelHotkeyCapture();
+        DeviceBox.IsHitTestVisible = true;
+        DeviceBox.Focusable = true;
+        DeviceBox.PlaceholderText = IsOnlineRecognitionSelected()
+            ? "请选择在线服务"
+            : "请选择语音模型";
         BridgeOutputRefreshButton.IsVisible = false;
         ModelLabel.Text = "语音模型";
         TitleSubtitleText.Text = IsOnlineRecognitionSelected()
@@ -1508,13 +1520,13 @@ public partial class MainWindow : Window
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             WindowDecorations = WindowDecorations.None,
+            ExtendClientAreaToDecorationsHint = true,
             Background = Brushes.Transparent,
+            TransparencyBackgroundFallback = Brushes.Transparent,
             Icon = LoadWindowIcon(),
             TransparencyLevelHint =
             [
-                WindowTransparencyLevel.Transparent,
-                WindowTransparencyLevel.AcrylicBlur,
-                WindowTransparencyLevel.None
+                WindowTransparencyLevel.Transparent
             ]
         };
 
@@ -1605,16 +1617,11 @@ public partial class MainWindow : Window
         dialog.Content = new Border
         {
             CornerRadius = new CornerRadius(18),
+            ClipToBounds = true,
             Padding = new Thickness(22),
             Background = Brushes.White,
             BorderBrush = Brush("#D8E1EC"),
             BorderThickness = new Thickness(1),
-            BoxShadow = new BoxShadows(new BoxShadow
-            {
-                Blur = 28,
-                OffsetY = 14,
-                Color = Color.Parse("#2D17263B")
-            }),
             Child = content
         };
 

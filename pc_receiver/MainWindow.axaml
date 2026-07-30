@@ -315,13 +315,17 @@
                          FontWeight="SemiBold" />
               <Grid Grid.Row="2"
                     Grid.Column="1"
+                    HorizontalAlignment="Stretch"
                     ColumnDefinitions="*,Auto">
                 <ComboBox x:Name="DeviceBox"
                           Grid.Column="0"
+                          HorizontalAlignment="Stretch"
                           MinHeight="38"
                           CornerRadius="9"
                           BorderBrush="#D6E0EC"
                           Background="White"
+                          PlaceholderText="未检测到桥接设备"
+                          PlaceholderForeground="#718096"
                           ItemTemplate="{StaticResource ModelDropDownItemTemplate}"
                           SelectionBoxItemTemplate="{StaticResource SelectedModelTemplate}" />
                 <Button x:Name="BridgeOutputRefreshButton"
