@@ -52,13 +52,16 @@ dotnet build
 dotnet run
 ```
 
-PC 端 AOT 发布和 MSI 打包：
+PC 端框架依赖单文件发布和 MSI 打包：
 
 ```powershell
 cd D:\Workspace\Test\MobileToPcInput\pc_receiver
-dotnet publish .\pc_receiver.csproj -c Release -r win-x64
+dotnet publish .\pc_receiver.csproj -c Release -r win-x64 --self-contained false
 powershell -ExecutionPolicy Bypass -File .\scripts\build-msi.ps1
 ```
+
+发布产物不包含 .NET 运行时。运行 PC 端前，目标电脑需要安装与项目版本匹配的
+`.NET 10 Runtime x64`。
 
 安装包输出到：
 

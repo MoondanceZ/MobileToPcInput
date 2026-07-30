@@ -49,33 +49,6 @@
             Value="[INSTALLFOLDER]" />
         </Component>
 
-        <Component Id="AvaloniaAngleNative" Guid="*">
-          <File Source="$(var.PublishDir)\av_libglesv2.dll" KeyPath="yes" />
-        </Component>
-
-        <Component Id="HarfBuzzNative" Guid="*">
-          <File Source="$(var.PublishDir)\libHarfBuzzSharp.dll" KeyPath="yes" />
-        </Component>
-
-        <Component Id="SkiaNative" Guid="*">
-          <File Source="$(var.PublishDir)\libSkiaSharp.dll" KeyPath="yes" />
-        </Component>
-
-        <Component Id="OnnxRuntimeNative" Guid="*">
-          <File Source="$(var.PublishDir)\onnxruntime.dll" KeyPath="yes" />
-        </Component>
-
-        <Component Id="OnnxRuntimeProvidersShared" Guid="*">
-          <File Source="$(var.PublishDir)\onnxruntime_providers_shared.dll" KeyPath="yes" />
-        </Component>
-
-        <Component Id="KaldiNativeFbank" Guid="*">
-          <File Source="$(var.PublishDir)\kaldi-native-fbank.dll" KeyPath="yes" />
-        </Component>
-
-        <Component Id="SherpaOnnxNative" Guid="*">
-          <File Source="$(var.PublishDir)\sherpa-onnx-c-api.dll" KeyPath="yes" />
-        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -96,13 +69,6 @@
 
     <Feature Id="MainFeature" Title="MobileToPcInput" Level="1">
       <ComponentRef Id="MobileToPcInputExe" />
-      <ComponentRef Id="AvaloniaAngleNative" />
-      <ComponentRef Id="HarfBuzzNative" />
-      <ComponentRef Id="SkiaNative" />
-      <ComponentRef Id="OnnxRuntimeNative" />
-      <ComponentRef Id="OnnxRuntimeProvidersShared" />
-      <ComponentRef Id="KaldiNativeFbank" />
-      <ComponentRef Id="SherpaOnnxNative" />
       <ComponentRef Id="ApplicationProgramsFolderComponent" />
     </Feature>
   </Package>

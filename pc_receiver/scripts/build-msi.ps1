@@ -56,22 +56,15 @@ $version = Get-ProjectVersion
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 
 if (-not $SkipPublish) {
-    Write-Host "Publishing MobileToPcInput AOT ($Configuration, $Runtime)..."
-    dotnet publish $project -c $Configuration -r $Runtime
+    Write-Host "Publishing MobileToPcInput framework-dependent single file ($Configuration, $Runtime)..."
+    dotnet publish $project -c $Configuration -r $Runtime --self-contained false
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }
 }
 
 $requiredFiles = @(
-    "MobileToPcInput.exe",
-    "av_libglesv2.dll",
-    "kaldi-native-fbank.dll",
-    "libHarfBuzzSharp.dll",
-    "libSkiaSharp.dll",
-    "onnxruntime.dll",
-    "onnxruntime_providers_shared.dll",
-    "sherpa-onnx-c-api.dll"
+    "MobileToPcInput.exe"
 )
 
 foreach ($file in $requiredFiles) {
