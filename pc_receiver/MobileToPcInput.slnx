@@ -1,4 +1,3 @@
 <Solution>
   <Project Path="pc_receiver.csproj" />
-  <Project Path="..\pc_receiver.Tests\pc_receiver.Tests.csproj" />
 </Solution>
