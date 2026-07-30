@@ -88,8 +88,8 @@ VB-CABLE 是第三方 donationware 驱动。发布包含该驱动的安装程序
 安装包输出到：
 
 ```text
-D:\Workspace\Test\MobileToPcInput\pc_receiver\artifacts\MobileToPcInput-1.0.1-x64.msi
-D:\Workspace\Test\MobileToPcInput\pc_receiver\artifacts\MobileToPcInput-Setup-1.0.1-x64.exe
+D:\Workspace\Test\MobileToPcInput\pc_receiver\artifacts\MobileToPcInput-1.0.2-x64.msi
+D:\Workspace\Test\MobileToPcInput\pc_receiver\artifacts\MobileToPcInput-Setup-1.0.2-x64.exe
 ```
 
 ```powershell
