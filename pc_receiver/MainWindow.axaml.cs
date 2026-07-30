@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
         new(RecognitionModes.Online, "在线服务"),
         new(RecognitionModes.WeType, "桥接输入"),
     ];
+    private const string VbCableDownloadUrl = "https://vb-audio.com/Cable/";
 
     private readonly AudioOutputService _audioOutput = new();
     private readonly WeTypeHotkeyService _weTypeHotkey;
@@ -48,6 +50,7 @@ public partial class MainWindow : Window
     private bool _isRefreshingMode;
     private bool _isApplyingSelectedModel;
     private bool _isCapturingHotkey;
+    private bool _isShowingVbCablePrompt;
     private readonly List<string> _capturedHotkeyTokens = [];
     private AppSettings _settings = new();
     private string _modelOperationMessage = "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。";
@@ -120,7 +123,7 @@ public partial class MainWindow : Window
         RefreshModels();
         UpdateConnectQrCode();
         ClearAudioCache(showStatus: false);
-        Loaded += (_, _) => _ = WarmUpAsrOnStartupAsync();
+        Loaded += async (_, _) => await WarmUpAsrOnStartupAsync();
 
         _server.ClientStateChanged += connected =>
         {
@@ -762,9 +765,10 @@ public partial class MainWindow : Window
         {
             var device = DeviceBox.SelectedItem as AudioOutputDevice
                 ?? _audioOutput.FindDevice(_settings.WeTypeOutputDeviceName);
-            if (device is null)
+            if (device is null || !IsVbCableInput(device))
             {
                 StatusText.Text = "未检测到 CABLE Input，请先安装或启用 VB-CABLE";
+                await ShowVbCableMissingDialogAsync();
                 return false;
             }
 
@@ -1065,6 +1069,13 @@ public partial class MainWindow : Window
         {
             _isAsrReady = true;
             RefreshModels();
+            if (!IsVbCableInstalled())
+            {
+                SetStatus("● 未检测到 VB-CABLE", "#C13830", "#FFF1F0");
+                await ShowVbCableMissingDialogAsync();
+                return;
+            }
+
             await StartListeningAsync();
             return;
         }
@@ -1422,6 +1433,172 @@ public partial class MainWindow : Window
         }
 
         RefreshModels();
+        if (nextMode == RecognitionModes.WeType && !IsVbCableInstalled())
+        {
+            SetStatus("● 未检测到 VB-CABLE", "#C13830", "#FFF1F0");
+            await ShowVbCableMissingDialogAsync();
+        }
+    }
+
+    private bool IsVbCableInstalled()
+    {
+        try
+        {
+            return _audioOutput.GetDevices().Any(IsVbCableInput);
+        }
+        catch (Exception ex)
+        {
+            AppLogger.Error("VB-CABLE detection failed", ex);
+            return false;
+        }
+    }
+
+    private static bool IsVbCableInput(AudioOutputDevice device)
+    {
+        var name = device.Name;
+        var isCableInput = name.Contains("CABLE Input", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("CABLE In", StringComparison.OrdinalIgnoreCase);
+        var isVbAudio = name.Contains("VB-Audio", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("CABLE Input", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("CABLE In ", StringComparison.OrdinalIgnoreCase);
+        return isCableInput && isVbAudio;
+    }
+
+    private async Task ShowVbCableMissingDialogAsync()
+    {
+        if (_isShowingVbCablePrompt)
+        {
+            return;
+        }
+
+        _isShowingVbCablePrompt = true;
+        var dialog = new Window
+        {
+            Width = 440,
+            Height = 260,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            WindowDecorations = WindowDecorations.None,
+            Background = Brushes.Transparent,
+            Icon = LoadWindowIcon(),
+            TransparencyLevelHint =
+            [
+                WindowTransparencyLevel.Transparent,
+                WindowTransparencyLevel.AcrylicBlur,
+                WindowTransparencyLevel.None
+            ]
+        };
+
+        var title = new TextBlock
+        {
+            Text = "需要安装 VB-CABLE",
+            FontSize = 20,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = Brush("#1C2739")
+        };
+        var description = new TextBlock
+        {
+            Text = "桥接输入需要 VB-Audio Virtual Cable。当前没有检测到 CABLE Input，请前往官方页面下载并安装，安装完成后重新选择桥接输入。",
+            FontSize = 14,
+            Foreground = Brush("#536174"),
+            TextWrapping = TextWrapping.Wrap
+        };
+        var linkText = new TextBlock
+        {
+            Text = VbCableDownloadUrl,
+            FontSize = 13,
+            Foreground = Brush("#1769E0"),
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var laterButton = new Button
+        {
+            MinHeight = 38,
+            Padding = new Thickness(18, 8),
+            Content = "暂不安装",
+            Background = Brush("#F8FAFC"),
+            Foreground = Brush("#1F334D"),
+            BorderBrush = Brush("#D6E0EC"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            FontWeight = FontWeight.SemiBold
+        };
+        laterButton.Click += (_, _) => dialog.Close();
+
+        var downloadButton = new Button
+        {
+            MinHeight = 38,
+            Padding = new Thickness(18, 8),
+            Content = "打开官方下载页",
+            Background = Brush("#1769E0"),
+            Foreground = Brushes.White,
+            BorderBrush = Brush("#1769E0"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            FontWeight = FontWeight.SemiBold
+        };
+        downloadButton.Click += (_, _) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = VbCableDownloadUrl,
+                    UseShellExecute = true
+                });
+                dialog.Close();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Opening VB-CABLE download page failed", ex);
+                StatusText.Text = $"无法打开下载页面: {ex.Message}";
+            }
+        };
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Spacing = 10
+        };
+        actions.Children.Add(laterButton);
+        actions.Children.Add(downloadButton);
+
+        var content = new StackPanel
+        {
+            Spacing = 16
+        };
+        content.Children.Add(title);
+        content.Children.Add(description);
+        content.Children.Add(linkText);
+        content.Children.Add(actions);
+
+        dialog.Content = new Border
+        {
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(22),
+            Background = Brushes.White,
+            BorderBrush = Brush("#D8E1EC"),
+            BorderThickness = new Thickness(1),
+            BoxShadow = new BoxShadows(new BoxShadow
+            {
+                Blur = 28,
+                OffsetY = 14,
+                Color = Color.Parse("#2D17263B")
+            }),
+            Child = content
+        };
+
+        ShowDialogBackdrop();
+        try
+        {
+            await dialog.ShowDialog(this);
+        }
+        finally
+        {
+            HideDialogBackdrop();
+            _isShowingVbCablePrompt = false;
+        }
     }
 
     private async Task<string> RecognizeOnlineAsync(string wavPath)

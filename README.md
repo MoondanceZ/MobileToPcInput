@@ -65,27 +65,19 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 发布产物不包含 .NET 运行时。运行 PC 端前，目标电脑需要安装与项目版本匹配的
 `.NET 10 Runtime x64`。
 
-### 包含 VB-CABLE 的引导安装程序
+### PC 引导安装程序
 
-普通用户建议使用 Burn 引导安装程序。它会先检测
-`HKLM\SYSTEM\CurrentControlSet\Services\VBAudioVACMME`：
-
-- 已安装 VB-CABLE：跳过驱动安装，直接安装 MobileToPcInput。
-- 未安装 VB-CABLE：先运行官方 `VBCABLE_Setup_x64.exe -i -h`，再安装
-  MobileToPcInput；安装完成后提示重启。
+MSI 和 Burn 引导安装程序都只安装 MobileToPcInput，不检测或捆绑
+VB-CABLE。软件启动后，如果当前使用桥接输入，或用户切换到桥接输入时，
+程序会检测 `CABLE Input`。未检测到时会显示提示，并提供 VB-Audio
+官方下载页面，由用户自行下载和安装驱动。
 
 ```powershell
 cd D:\Workspace\Test\MobileToPcInput
 powershell -ExecutionPolicy Bypass -File .\pc_receiver\scripts\build-setup.ps1
 ```
 
-脚本会从 VB-Audio 官方地址下载 `VBCABLE_Driver_Pack45.zip`，校验固定的
-SHA-256 后，将完整驱动包与 MSI 一起封装。也可以通过
-`-VbCableZip D:\path\VBCABLE_Driver_Pack45.zip` 指定已审核的官方包。
-
-VB-CABLE 是第三方 donationware 驱动。发布包含该驱动的安装程序前，发布者需要
-自行确认 VB-Audio 的再分发授权及专业/商业使用许可。驱动安装仍可能显示 Windows
-安全确认，无法完全静默；安装后需要重启。
+VB-CABLE 是第三方 donationware 驱动，不包含在本项目安装包内。
 
 安装包输出到：
 
