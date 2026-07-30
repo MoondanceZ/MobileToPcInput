@@ -10,7 +10,7 @@
     <Nullable>enable</Nullable>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets\app-v3.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
@@ -22,8 +22,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\app-v3.png" />
-    <AvaloniaResource Include="Assets\app-v3.ico" />
+    <AvaloniaResource Include="Assets\app.png" />
+    <AvaloniaResource Include="Assets\app.ico" />
   </ItemGroup>
 
   <ItemGroup>

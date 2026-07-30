@@ -837,7 +837,7 @@ public partial class MainWindow : Window
     private void SetAppImages()
     {
         Icon = LoadWindowIcon();
-        LogoImage.Source = new Bitmap(AssetLoader.Open(new Uri("avares://MobileToPcInput/Assets/app-v3.png")));
+        LogoImage.Source = new Bitmap(AssetLoader.Open(new Uri("avares://MobileToPcInput/Assets/app.png")));
     }
 
     private TrayIcon CreateTrayIcon()
@@ -879,7 +879,7 @@ public partial class MainWindow : Window
 
     private static WindowIcon LoadWindowIcon()
     {
-        return new WindowIcon(AssetLoader.Open(new Uri("avares://MobileToPcInput/Assets/app-v3.ico")));
+        return new WindowIcon(AssetLoader.Open(new Uri("avares://MobileToPcInput/Assets/app.ico")));
     }
 
     private void RestoreWindow()
