@@ -1,6 +1,9 @@
 namespace pc_receiver;
 
-public sealed record AudioOutputDevice(int DeviceNumber, string Name)
+public sealed record AudioOutputDevice(
+    int DeviceNumber,
+    string Name,
+    string EndpointId)
 {
     public string DisplayName => Name;
     public string Description => IsLikelyVirtualCable

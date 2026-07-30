@@ -775,7 +775,7 @@ public partial class MainWindow : Window
 
             try
             {
-                _audioOutput.Start(device.DeviceNumber);
+                _audioOutput.Start(device);
                 _settings.WeTypeOutputDeviceName = device.Name;
                 SaveSettings();
                 return true;

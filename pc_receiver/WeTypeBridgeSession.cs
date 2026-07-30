@@ -6,8 +6,10 @@ namespace pc_receiver;
 
 public interface IWeTypeAudioOutput
 {
+    TimeSpan BufferedDuration { get; }
     void ClearBuffer();
     void AddSamples(byte[] bytes);
+    void AddSilence(TimeSpan duration);
     Task DrainAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
 }
 
@@ -19,7 +21,10 @@ public interface IWeTypeHotkeyController
 
 public sealed class WeTypeBridgeSession : IDisposable
 {
-    private static readonly TimeSpan DrainTimeout = TimeSpan.FromMilliseconds(900);
+    private static readonly TimeSpan StartupSilence = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan TrailingSilence = TimeSpan.FromMilliseconds(350);
+    private static readonly TimeSpan MinimumDrainTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan DrainSafetyMargin = TimeSpan.FromSeconds(2);
     private readonly object _sync = new();
     private readonly IWeTypeAudioOutput _audioOutput;
     private readonly IWeTypeHotkeyController _hotkey;
@@ -46,6 +51,7 @@ public sealed class WeTypeBridgeSession : IDisposable
             try
             {
                 _hotkey.Press();
+                _audioOutput.AddSilence(StartupSilence);
                 Volatile.Write(ref _state, 1);
             }
             catch
@@ -83,7 +89,14 @@ public sealed class WeTypeBridgeSession : IDisposable
 
         try
         {
-            await _audioOutput.DrainAsync(DrainTimeout, cancellationToken);
+            _audioOutput.AddSilence(TrailingSilence);
+            var drainTimeout = _audioOutput.BufferedDuration + DrainSafetyMargin;
+            if (drainTimeout < MinimumDrainTimeout)
+            {
+                drainTimeout = MinimumDrainTimeout;
+            }
+
+            await _audioOutput.DrainAsync(drainTimeout, cancellationToken);
         }
         finally
         {

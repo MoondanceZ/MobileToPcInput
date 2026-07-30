@@ -10,6 +10,10 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'audio_session_sender.dart';
+import 'audio_stream_stop_coordinator.dart';
+import 'audio_transport.dart';
+
 const _appBackgroundColor = Color(0xffeef6ff);
 
 Future<void> main() async {
@@ -63,6 +67,9 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
   Socket? _socket;
   StreamSubscription<Uint8List>? _socketSubscription;
   StreamSubscription<Uint8List>? _audioSubscription;
+  Completer<void>? _audioStreamDone;
+  Completer<void>? _recordingStartDone;
+  AudioSessionSender? _audioSessionSender;
   bool _isConnecting = false;
   bool _isConnected = false;
   bool _manualDisconnect = false;
@@ -233,6 +240,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
     }
 
     _isStartingRecording = true;
+    final recordingStartDone = Completer<void>();
+    _recordingStartDone = recordingStartDone;
 
     try {
       unawaited(HapticFeedback.mediumImpact());
@@ -245,45 +254,65 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         return;
       }
 
-      if (_sendControlMessage('asr-start')) {
-        _isAsrSessionActive = true;
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 120));
-
-      if (!_isTalkPressed) {
-        return;
-      }
-
       final stream = await _recorder.startStream(
         const RecordConfig(
           encoder: AudioEncoder.pcm16bits,
-          sampleRate: 16000,
-          numChannels: 1,
+          sampleRate: AudioTransport.sampleRate,
+          numChannels: AudioTransport.channelCount,
           autoGain: true,
           echoCancel: false,
           noiseSuppress: true,
+          streamBufferSize: AudioTransport.streamBufferSize,
         ),
       );
 
+      final firstAudioChunk = Completer<void>();
+      final sessionSender = AudioSessionSender(
+        sendStart: () => _sendControlMessage('asr-start'),
+        sendAudio: (bytes) => _sendFrame(2, bytes),
+      );
+      _audioSessionSender = sessionSender;
+      _audioStreamDone = Completer<void>();
       _audioSubscription = stream.listen(
         (chunk) {
-          _sendFrame(2, chunk);
+          sessionSender.addAudio(chunk);
+          if (!firstAudioChunk.isCompleted) {
+            firstAudioChunk.complete();
+          }
           final level = _calculateLevel(chunk);
           if (mounted) {
             setState(() => _level = level);
           }
         },
         onError: (Object error) {
+          if (!firstAudioChunk.isCompleted) {
+            firstAudioChunk.complete();
+          }
+          _completeAudioStream();
           _setStatus('录音错误: $error');
           unawaited(_stopRecording());
+        },
+        onDone: () {
+          if (!firstAudioChunk.isCompleted) {
+            firstAudioChunk.complete();
+          }
+          _completeAudioStream();
         },
         cancelOnError: true,
       );
 
-      if (!_isTalkPressed) {
-        await _stopRecording();
-        return;
+      try {
+        await firstAudioChunk.future.timeout(
+          const Duration(milliseconds: 250),
+        );
+      } on TimeoutException {
+        // Start the bridge even if a device is slow to publish its first chunk.
       }
+
+      if (!sessionSender.start()) {
+        throw const SocketException('无法启动电脑端语音会话');
+      }
+      _isAsrSessionActive = true;
 
       setState(() {
         _isRecording = true;
@@ -297,6 +326,12 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       }
     } finally {
       _isStartingRecording = false;
+      if (!recordingStartDone.isCompleted) {
+        recordingStartDone.complete();
+      }
+      if (identical(_recordingStartDone, recordingStartDone)) {
+        _recordingStartDone = null;
+      }
     }
   }
 
@@ -365,18 +400,19 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       return;
     }
 
-    final header = ByteData(5)
-      ..setUint8(0, type)
-      ..setUint32(1, payload.length, Endian.big);
     try {
-      socket.add(header.buffer.asUint8List());
-      socket.add(payload);
+      socket.add(AudioTransport.buildFrame(type, payload));
     } catch (_) {
       _handleSocketClosed('正在重连...');
     }
   }
 
   Future<void> _stopRecording() async {
+    final recordingStartDone = _recordingStartDone;
+    if (_isStartingRecording && recordingStartDone != null) {
+      await recordingStartDone.future;
+    }
+
     if (_isStoppingRecording) {
       return;
     }
@@ -393,11 +429,22 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
 
     try {
       if (_isRecording || _audioSubscription != null) {
-        await _recorder.stop();
-        await Future<void>.delayed(const Duration(milliseconds: 180));
-        await _audioSubscription?.cancel();
+        final subscription = _audioSubscription;
+        final streamDone = _audioStreamDone?.future ?? Future<void>.value();
+        await finishAudioStream(
+          stopRecorder: () async {
+            await _recorder.stop();
+          },
+          streamDone: streamDone,
+          cancelSubscription: () async {
+            await subscription?.cancel();
+          },
+          flushSocket: () async {
+            await _socket?.flush();
+          },
+        );
         _audioSubscription = null;
-        await _socket?.flush();
+        _audioStreamDone = null;
       }
 
       if (_isAsrSessionActive) {
@@ -405,6 +452,8 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
         await _socket?.flush();
         _isAsrSessionActive = false;
       }
+      _audioSessionSender?.discard();
+      _audioSessionSender = null;
 
       if (mounted) {
         setState(() {
@@ -415,6 +464,13 @@ class _MicrophoneBridgePageState extends State<MicrophoneBridgePage> {
       }
     } finally {
       _isStoppingRecording = false;
+    }
+  }
+
+  void _completeAudioStream() {
+    final completer = _audioStreamDone;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
     }
   }
 

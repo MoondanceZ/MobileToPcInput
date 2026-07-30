@@ -109,6 +109,7 @@ public sealed class WeTypeBridgeSessionTests
         {
             "clear",
             "press",
+            "silence:300",
             "audio:2",
         }));
         Assert.That(session.IsActive, Is.True);
@@ -131,11 +132,30 @@ public sealed class WeTypeBridgeSessionTests
         {
             "clear",
             "press",
-            "drain",
+            "silence:300",
+            "silence:350",
+            "drain:3000",
             "release",
             "clear",
         }));
         Assert.That(session.IsActive, Is.False);
+    }
+
+    [Test]
+    public async Task Stop_timeout_scales_with_buffered_audio_instead_of_truncating_it()
+    {
+        var events = new List<string>();
+        var output = new FakeAudioOutput(events)
+        {
+            BufferedDuration = TimeSpan.FromSeconds(6),
+        };
+        var hotkey = new FakeHotkeyController(events);
+        using var session = new WeTypeBridgeSession(output, hotkey);
+
+        await session.StartAsync();
+        await session.StopAsync();
+
+        Assert.That(events, Does.Contain("drain:8000"));
     }
 
     [Test]
@@ -153,6 +173,7 @@ public sealed class WeTypeBridgeSessionTests
         {
             "clear",
             "press",
+            "silence:300",
             "release",
             "clear",
         }));
@@ -180,6 +201,8 @@ public sealed class WeTypeBridgeSessionTests
 
     private sealed class FakeAudioOutput(List<string> events) : IWeTypeAudioOutput
     {
+        public TimeSpan BufferedDuration { get; init; }
+
         public void ClearBuffer()
         {
             events.Add("clear");
@@ -190,9 +213,14 @@ public sealed class WeTypeBridgeSessionTests
             events.Add($"audio:{bytes.Length}");
         }
 
+        public void AddSilence(TimeSpan duration)
+        {
+            events.Add($"silence:{duration.TotalMilliseconds:0}");
+        }
+
         public Task DrainAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
         {
-            events.Add("drain");
+            events.Add($"drain:{timeout.TotalMilliseconds:0}");
             return Task.CompletedTask;
         }
     }
