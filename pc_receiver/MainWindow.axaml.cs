@@ -293,6 +293,7 @@ public partial class MainWindow : Window
             PortBox.IsEnabled = false;
             ModeBox.IsEnabled = false;
             DeviceBox.IsEnabled = false;
+            BridgeOutputRefreshButton.IsEnabled = false;
             ManageModelButton.IsEnabled = !IsWeTypeRecognitionSelected();
             UpdateHotkeyButtonsEnabled();
             SetStatus($"● 正在监听 0.0.0.0:{port}", "#1769E0", "#EEF6FF");
@@ -311,6 +312,7 @@ public partial class MainWindow : Window
             PortBox.IsEnabled = true;
             ModeBox.IsEnabled = true;
             DeviceBox.IsEnabled = true;
+            BridgeOutputRefreshButton.IsEnabled = IsWeTypeRecognitionSelected();
             ManageModelButton.IsEnabled = !IsWeTypeRecognitionSelected();
             UpdateHotkeyButtonsEnabled();
         }
@@ -324,6 +326,26 @@ public partial class MainWindow : Window
     private void RefreshButton_Click(object? sender, RoutedEventArgs e)
     {
         RefreshModels();
+    }
+
+    private async void BridgeOutputRefreshButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (!IsWeTypeRecognitionSelected())
+        {
+            return;
+        }
+
+        RefreshModels();
+        if (DeviceBox.SelectedItem is AudioOutputDevice device && IsVbCableInput(device))
+        {
+            _settings.WeTypeOutputDeviceName = device.Name;
+            SaveSettings();
+            SetStatus("● 已刷新桥接输出设备", "#1769E0", "#EEF6FF");
+            return;
+        }
+
+        SetStatus("● 未检测到 VB-CABLE", "#C13830", "#FFF1F0");
+        await ShowVbCableMissingDialogAsync();
     }
 
     private void RefreshModels()
@@ -341,7 +363,9 @@ public partial class MainWindow : Window
                     item => string.Equals(
                         item.Name,
                         _settings.WeTypeOutputDeviceName,
-                        StringComparison.OrdinalIgnoreCase))
+                        StringComparison.OrdinalIgnoreCase)
+                        && IsVbCableInput(item))
+                    ?? devices.FirstOrDefault(IsVbCableInput)
                     ?? devices.FirstOrDefault();
             }
             else
@@ -372,6 +396,7 @@ public partial class MainWindow : Window
         PortBox.IsEnabled = true;
         ModeBox.IsEnabled = true;
         DeviceBox.IsEnabled = true;
+        BridgeOutputRefreshButton.IsEnabled = IsWeTypeRecognitionSelected();
         ManageModelButton.IsEnabled = !IsWeTypeRecognitionSelected();
         UpdateHotkeyButtonsEnabled();
         UpdateModelUi();
@@ -631,6 +656,8 @@ public partial class MainWindow : Window
     {
         if (IsWeTypeRecognitionSelected())
         {
+            BridgeOutputRefreshButton.IsVisible = true;
+            BridgeOutputRefreshButton.IsEnabled = !StopButton.IsEnabled;
             ModelLabel.Text = "桥接输出";
             TitleSubtitleText.Text = "手机麦克风接收器 · 桥接输入";
             var hotkey = BridgeHotkeyDefinition.Parse(_settings.BridgeHotkey);
@@ -666,6 +693,7 @@ public partial class MainWindow : Window
         }
 
         CancelHotkeyCapture();
+        BridgeOutputRefreshButton.IsVisible = false;
         ModelLabel.Text = "语音模型";
         TitleSubtitleText.Text = IsOnlineRecognitionSelected()
             ? "手机麦克风接收器 · 在线语音识别"

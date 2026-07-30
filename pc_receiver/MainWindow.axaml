@@ -313,15 +313,39 @@
                          Text="语音模型"
                          Foreground="#536174"
                          FontWeight="SemiBold" />
-              <ComboBox x:Name="DeviceBox"
-                        Grid.Row="2"
+              <Grid Grid.Row="2"
+                    Grid.Column="1"
+                    ColumnDefinitions="*,Auto">
+                <ComboBox x:Name="DeviceBox"
+                          Grid.Column="0"
+                          MinHeight="38"
+                          CornerRadius="9"
+                          BorderBrush="#D6E0EC"
+                          Background="White"
+                          ItemTemplate="{StaticResource ModelDropDownItemTemplate}"
+                          SelectionBoxItemTemplate="{StaticResource SelectedModelTemplate}" />
+                <Button x:Name="BridgeOutputRefreshButton"
                         Grid.Column="1"
+                        Margin="8,0,0,0"
+                        Width="38"
+                        Height="38"
+                        MinWidth="38"
                         MinHeight="38"
-                        CornerRadius="9"
+                        Padding="0"
+                        IsVisible="False"
+                        Click="BridgeOutputRefreshButton_Click"
+                        Content="↻"
+                        FontSize="20"
+                        FontWeight="SemiBold"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        Background="#F8FAFC"
+                        Foreground="#1769E0"
                         BorderBrush="#D6E0EC"
-                        Background="White"
-                        ItemTemplate="{StaticResource ModelDropDownItemTemplate}"
-                        SelectionBoxItemTemplate="{StaticResource SelectedModelTemplate}" />
+                        BorderThickness="1"
+                        CornerRadius="9"
+                        ToolTip.Tip="刷新桥接输出设备" />
+              </Grid>
             </Grid>
 
             <Grid ColumnDefinitions="Auto,12,Auto,*,Auto">
