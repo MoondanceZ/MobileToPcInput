@@ -1,0 +1,83 @@
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+  xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle
+    Name="MobileToPcInput 安装程序"
+    Manufacturer="MobileToPcInput"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="f680d53c-000e-46a3-8986-2c0a023a3fdd"
+    Compressed="yes"
+    IconSourceFile="$(var.ProjectDir)\Assets\app.ico">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        Theme="hyperlinkLicense"
+        LicenseUrl=""
+        ShowVersion="yes"
+        SuppressOptionsUI="yes" />
+    </BootstrapperApplication>
+
+    <util:RegistrySearch
+      Id="DetectVbCableDriver"
+      Variable="VbCableDriverPresent"
+      Root="HKLM"
+      Key="SYSTEM\CurrentControlSet\Services\VBAudioVACMME"
+      Result="exists"
+      Bitness="always64" />
+
+    <Chain>
+      <ExePackage
+        Id="VbCableDriver"
+        DisplayName="VB-Audio Virtual Cable"
+        Description="MobileToPcInput 桥接输入所需的虚拟音频驱动"
+        SourceFile="$(var.VbCableDir)\VBCABLE_Setup_x64.exe"
+        Name="VBCABLE\VBCABLE_Setup_x64.exe"
+        InstallArguments="-i -h"
+        DetectCondition="VbCableDriverPresent"
+        PerMachine="yes"
+        Permanent="yes"
+        Vital="yes"
+        Protocol="none">
+        <ExitCode Value="0" Behavior="scheduleReboot" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+        <ExitCode Behavior="error" />
+        <Payload SourceFile="$(var.VbCableDir)\pin_in.ico" Name="VBCABLE\pin_in.ico" />
+        <Payload SourceFile="$(var.VbCableDir)\pin_out.ico" Name="VBCABLE\pin_out.ico" />
+        <Payload SourceFile="$(var.VbCableDir)\readme.txt" Name="VBCABLE\readme.txt" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_2003.cat" Name="VBCABLE\vbaudio_cable_2003.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_2003.sys" Name="VBCABLE\vbaudio_cable_2003.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_vista.cat" Name="VBCABLE\vbaudio_cable_vista.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_vista.sys" Name="VBCABLE\vbaudio_cable_vista.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_win7.cat" Name="VBCABLE\vbaudio_cable_win7.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_win7.sys" Name="VBCABLE\vbaudio_cable_win7.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_xp.cat" Name="VBCABLE\vbaudio_cable_xp.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable_xp.sys" Name="VBCABLE\vbaudio_cable_xp.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_2003.cat" Name="VBCABLE\vbaudio_cable64_2003.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_2003.sys" Name="VBCABLE\vbaudio_cable64_2003.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_vista.cat" Name="VBCABLE\vbaudio_cable64_vista.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_vista.sys" Name="VBCABLE\vbaudio_cable64_vista.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_win10.cat" Name="VBCABLE\vbaudio_cable64_win10.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_win10.sys" Name="VBCABLE\vbaudio_cable64_win10.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_win7.cat" Name="VBCABLE\vbaudio_cable64_win7.cat" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64_win7.sys" Name="VBCABLE\vbaudio_cable64_win7.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\vbaudio_cable64arm_win10.sys" Name="VBCABLE\vbaudio_cable64arm_win10.sys" />
+        <Payload SourceFile="$(var.VbCableDir)\VBCABLE_ControlPanel.exe" Name="VBCABLE\VBCABLE_ControlPanel.exe" />
+        <Payload SourceFile="$(var.VbCableDir)\VBCABLE_Setup.exe" Name="VBCABLE\VBCABLE_Setup.exe" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable_2003.inf" Name="VBCABLE\vbMmeCable_2003.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable_vista.inf" Name="VBCABLE\vbMmeCable_vista.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable_win7.inf" Name="VBCABLE\vbMmeCable_win7.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable_xp.inf" Name="VBCABLE\vbMmeCable_xp.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable64_2003.inf" Name="VBCABLE\vbMmeCable64_2003.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable64_vista.inf" Name="VBCABLE\vbMmeCable64_vista.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable64_win10.inf" Name="VBCABLE\vbMmeCable64_win10.inf" />
+        <Payload SourceFile="$(var.VbCableDir)\vbMmeCable64_win7.inf" Name="VBCABLE\vbMmeCable64_win7.inf" />
+      </ExePackage>
+
+      <MsiPackage
+        Id="MobileToPcInputMsi"
+        SourceFile="$(var.MsiPath)"
+        Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

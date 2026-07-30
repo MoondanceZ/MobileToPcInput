@@ -458,6 +458,18 @@
                         Foreground="#1F334D"
                         Content="开机自动启动 MobileToPcInput" />
             </Border>
+            <Border x:Name="ReplaceTrailingFullStopSettingsCard"
+                    CornerRadius="10"
+                    Background="White"
+                    BorderBrush="#DDE6F1"
+                    BorderThickness="1"
+                    Padding="8,5">
+              <CheckBox x:Name="ReplaceTrailingFullStopBox"
+                        VerticalAlignment="Center"
+                        FontSize="13"
+                        Foreground="#1F334D"
+                        Content="句末句号改为空格" />
+            </Border>
             <Border x:Name="BridgeHotkeySettingsCard"
                     IsVisible="False"
                     CornerRadius="12"

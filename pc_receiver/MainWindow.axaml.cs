@@ -83,11 +83,14 @@ public partial class MainWindow : Window
         PortBox.Text = IsValidPort(_settings.Port) ? _settings.Port.ToString() : "8765";
         var startupEnabled = _startupService.IsEnabled();
         StartupBox.IsChecked = startupEnabled;
+        ReplaceTrailingFullStopBox.IsChecked = _settings.ReplaceTrailingFullStopWithSpace;
         BridgeHotkeyEnabledBox.IsChecked = _settings.BridgeHotkeyEnabled;
         _asrService.ReplaceTrailingFullStopWithSpaceEnabled = _settings.ReplaceTrailingFullStopWithSpace;
         _settings.StartupEnabled = startupEnabled;
         SaveSettings();
         StartupBox.Click += (_, _) => SetStartupEnabled(StartupBox.IsChecked == true);
+        ReplaceTrailingFullStopBox.Click += (_, _) =>
+            SetReplaceTrailingFullStopWithSpace(ReplaceTrailingFullStopBox.IsChecked == true);
         BridgeHotkeyEnabledBox.Click += (_, _) =>
             SetBridgeHotkeyEnabled(BridgeHotkeyEnabledBox.IsChecked == true);
         HotkeyCaptureButton.Click += (_, _) => StartHotkeyCapture();
@@ -636,6 +639,7 @@ public partial class MainWindow : Window
                 : "使用流程：将 CABLE Output 设为 Windows 默认麦克风；当前未启用自动按键，手机按住说话时仅转发音频。";
             ClearAudioCacheButton.IsVisible = false;
             ManageModelButton.IsEnabled = false;
+            ReplaceTrailingFullStopSettingsCard.IsVisible = false;
             BridgeHotkeySettingsCard.IsVisible = true;
             BridgeHotkeyEnabledBox.IsChecked = _settings.BridgeHotkeyEnabled;
             UpdateHotkeyButtonsEnabled();
@@ -669,6 +673,7 @@ public partial class MainWindow : Window
         UsageText.Text = "使用流程：电脑端开始监听；手机连接后按住说话，松开后完成识别，并把文本直接输入到当前输入框。";
         ClearAudioCacheButton.IsVisible = true;
         ManageModelButton.IsEnabled = true;
+        ReplaceTrailingFullStopSettingsCard.IsVisible = true;
         BridgeHotkeySettingsCard.IsVisible = false;
 
         if (IsOnlineRecognitionSelected())
@@ -905,6 +910,14 @@ public partial class MainWindow : Window
             _settings.StartupEnabled = actual;
             SaveSettings();
         }
+    }
+
+    private void SetReplaceTrailingFullStopWithSpace(bool enabled)
+    {
+        ReplaceTrailingFullStopBox.IsChecked = enabled;
+        _asrService.ReplaceTrailingFullStopWithSpaceEnabled = enabled;
+        _settings.ReplaceTrailingFullStopWithSpace = enabled;
+        SaveSettings();
     }
 
     private void SyncListeningUi(bool isListening)
