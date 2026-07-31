@@ -24,6 +24,8 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\app.png" />
     <AvaloniaResource Include="Assets\app.ico" />
+    <EmbeddedResource Include="Assets\VBCABLE_Driver_Pack45.zip"
+                      LogicalName="MobileToPcInput.Assets.VBCABLE_Driver_Pack45.zip" />
   </ItemGroup>
 
   <ItemGroup>

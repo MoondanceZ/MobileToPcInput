@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -25,9 +24,6 @@ public partial class MainWindow : Window
         new(RecognitionModes.Online, "在线服务"),
         new(RecognitionModes.WeType, "桥接输入"),
     ];
-    private const string VbCableDownloadUrl =
-        "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip";
-
     private readonly AudioOutputService _audioOutput = new();
     private readonly WeTypeHotkeyService _weTypeHotkey;
     private readonly WeTypeBridgeSession _weTypeBridge;
@@ -1516,7 +1512,7 @@ public partial class MainWindow : Window
         var dialog = new Window
         {
             Width = 440,
-            Height = 260,
+            Height = 286,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             WindowDecorations = WindowDecorations.None,
@@ -1539,16 +1535,16 @@ public partial class MainWindow : Window
         };
         var description = new TextBlock
         {
-            Text = "桥接输入需要 VB-Audio Virtual Cable。下载后请解压，以管理员身份运行 VBCABLE_Setup_x64.exe；安装完成并重启 Windows 后，返回软件刷新桥接输出。",
+            Text = "桥接输入需要 VB-Audio Virtual Cable。点击安装后，程序会把内嵌安装包解压到临时目录，并以管理员身份启动官方安装程序；安装完成后必须重启 Windows。",
             FontSize = 14,
             Foreground = Brush("#536174"),
             TextWrapping = TextWrapping.Wrap
         };
-        var linkText = new TextBlock
+        var licensingText = new TextBlock
         {
-            Text = VbCableDownloadUrl,
+            Text = "来源：www.vb-cable.com · VB-CABLE 是 Donationware，欢迎按使用情况自愿支持作者。",
             FontSize = 13,
-            Foreground = Brush("#1769E0"),
+            Foreground = Brush("#718096"),
             TextWrapping = TextWrapping.Wrap
         };
 
@@ -1566,11 +1562,11 @@ public partial class MainWindow : Window
         };
         laterButton.Click += (_, _) => dialog.Close();
 
-        var downloadButton = new Button
+        var installButton = new Button
         {
             MinHeight = 38,
             Padding = new Thickness(18, 8),
-            Content = "下载 VB-CABLE",
+            Content = "安装 VB-CABLE",
             Background = Brush("#1769E0"),
             Foreground = Brushes.White,
             BorderBrush = Brush("#1769E0"),
@@ -1578,21 +1574,45 @@ public partial class MainWindow : Window
             CornerRadius = new CornerRadius(10),
             FontWeight = FontWeight.SemiBold
         };
-        downloadButton.Click += (_, _) =>
+        installButton.Click += async (_, _) =>
         {
+            laterButton.IsEnabled = false;
+            installButton.IsEnabled = false;
+            installButton.Content = "正在准备安装...";
             try
             {
-                Process.Start(new ProcessStartInfo
+                SetStatus("● 正在启动 VB-CABLE 安装程序", "#1769E0", "#EEF6FF");
+                var outcome = await VbCableInstallerService.InstallAsync();
+                if (outcome == VbCableInstallOutcome.Canceled)
                 {
-                    FileName = VbCableDownloadUrl,
-                    UseShellExecute = true
-                });
+                    SetStatus("● 已取消安装 VB-CABLE", "#C13830", "#FFF1F0");
+                    laterButton.IsEnabled = true;
+                    installButton.IsEnabled = true;
+                    installButton.Content = "安装 VB-CABLE";
+                    return;
+                }
+
                 dialog.Close();
+                RefreshModels();
+                if (IsVbCableInstalled())
+                {
+                    SetStatus("● VB-CABLE 已安装", "#1769E0", "#EEF6FF");
+                }
+                else
+                {
+                    SetStatus(
+                        "● 安装程序已结束，请重启 Windows 后刷新桥接输出",
+                        "#B15B00",
+                        "#FFF7E8");
+                }
             }
             catch (Exception ex)
             {
-                AppLogger.Error("Opening VB-CABLE download page failed", ex);
-                StatusText.Text = $"无法打开下载页面: {ex.Message}";
+                AppLogger.Error("Installing VB-CABLE failed", ex);
+                SetStatus($"● VB-CABLE 安装失败：{ex.Message}", "#C13830", "#FFF1F0");
+                laterButton.IsEnabled = true;
+                installButton.IsEnabled = true;
+                installButton.Content = "重试安装";
             }
         };
 
@@ -1603,7 +1623,7 @@ public partial class MainWindow : Window
             Spacing = 10
         };
         actions.Children.Add(laterButton);
-        actions.Children.Add(downloadButton);
+        actions.Children.Add(installButton);
 
         var content = new StackPanel
         {
@@ -1611,7 +1631,7 @@ public partial class MainWindow : Window
         };
         content.Children.Add(title);
         content.Children.Add(description);
-        content.Children.Add(linkText);
+        content.Children.Add(licensingText);
         content.Children.Add(actions);
 
         dialog.Content = new Border

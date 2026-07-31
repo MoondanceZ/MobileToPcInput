@@ -31,8 +31,8 @@ Flutter Android 手机麦克风 + Avalonia Windows 接收器。手机通过 WiFi
 
 首次使用需要完成以下设置：
 
-1. 安装并启用微信输入法与
-   [VB-Audio Virtual Cable](https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip)。
+1. 安装并启用微信输入法。切换到桥接输入时，如果程序没有检测到
+   VB-Audio Virtual Cable，可在提示窗口中直接启动内嵌的官方安装程序。
 2. 在 Windows“系统 → 声音 → 输入”中，将
    `CABLE Output (VB-Audio Virtual Cable)`设为默认录音设备。
 3. 启动 `pc_receiver`，将“识别方式”切换为“桥接输入”，确认桥接输出为
@@ -68,17 +68,21 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
 
 ### PC 引导安装程序
 
-MSI 和 Burn 引导安装程序都只安装 MobileToPcInput，不检测或捆绑
-VB-CABLE。软件启动后，如果当前使用桥接输入，或用户切换到桥接输入时，
-程序会检测 `CABLE Input`。未检测到时会显示提示，并提供 VB-Audio
-官方下载页面，由用户自行下载和安装驱动。
+MSI 和 Burn 引导安装程序本身只安装 MobileToPcInput。PC 程序内嵌了
+VB-CABLE 官方原始 ZIP 包；当前使用桥接输入，或用户切换到桥接输入时，
+程序会检测 `CABLE Input`。未检测到时会先征得用户同意，再把内嵌包解压到
+独立临时目录，以管理员权限启动 `VBCABLE_Setup_x64.exe`。官方安装程序结束后，
+临时目录会被清理；用户需要重启 Windows，然后在程序中刷新桥接输出。
 
 ```powershell
 cd D:\Workspace\Test\MobileToPcInput
 powershell -ExecutionPolicy Bypass -File .\pc_receiver\scripts\build-setup.ps1
 ```
 
-VB-CABLE 是第三方 donationware 驱动，不包含在本项目安装包内。
+VB-CABLE 来源于 [www.vb-cable.com](https://www.vb-cable.com)，是 VB-Audio
+提供的第三方 Donationware 驱动，欢迎用户按实际使用情况自愿支持作者。
+专业、机构或批量分发请遵守
+[VB-Audio Licensing](https://vb-audio.com/Services/licensing.htm)。
 
 安装包输出到：
 
