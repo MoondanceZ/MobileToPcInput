@@ -1512,7 +1512,7 @@ public partial class MainWindow : Window
         var dialog = new Window
         {
             Width = 440,
-            Height = 286,
+            Height = 260,
             CanResize = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             WindowDecorations = WindowDecorations.None,
@@ -1535,7 +1535,7 @@ public partial class MainWindow : Window
         };
         var description = new TextBlock
         {
-            Text = "桥接输入需要 VB-Audio Virtual Cable。点击安装后，程序会把内嵌安装包解压到临时目录，并以管理员身份启动官方安装程序；安装完成后必须重启 Windows。",
+            Text = "桥接输入需要 VB-Audio Virtual Cable。点击安装后将启动官方安装程序；安装完成后请重启 Windows。",
             FontSize = 14,
             Foreground = Brush("#536174"),
             TextWrapping = TextWrapping.Wrap
