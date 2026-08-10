@@ -160,6 +160,7 @@
                Width="42"
                Height="42"
                Stretch="Uniform"
+               RenderOptions.BitmapInterpolationMode="HighQuality"
                VerticalAlignment="Center" />
 
         <StackPanel Grid.Column="1"

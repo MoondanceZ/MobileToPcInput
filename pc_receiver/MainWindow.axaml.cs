@@ -917,10 +917,9 @@ public partial class MainWindow : Window
 
     private static WindowIcon LoadWindowIcon()
     {
-        // Decode the PNG at runtime and let Avalonia create the native HICON.
-        // Some Windows 10 builds render PNG-compressed ICO frames as a generic
-        // .ico document icon in the taskbar or notification area.
-        return new WindowIcon(AssetLoader.Open(new Uri("avares://MobileToPcInput/Assets/app.png")));
+        // The ICO contains native uncompressed DIB frames from 16 to 256 px.
+        // Windows can select the nearest frame instead of scaling one large PNG.
+        return new WindowIcon(AssetLoader.Open(new Uri("avares://MobileToPcInput/Assets/app.ico")));
     }
 
     private void RestoreWindow()
