@@ -100,6 +100,24 @@ public sealed class BridgeHotkeyDefinition
         return token.Length > 0;
     }
 
+    public static bool TryGetToken(ushort virtualKey, out string token)
+    {
+        token = virtualKey switch
+        {
+            0x11 or 0xA2 or 0xA3 => "Ctrl",
+            0x5B or 0x5C => "Win",
+            0x12 or 0xA4 or 0xA5 => "Alt",
+            0x10 or 0xA0 or 0xA1 => "Shift",
+            0x20 => "Space",
+            0x0D => "Enter",
+            >= 0x41 and <= 0x5A => ((char)virtualKey).ToString(),
+            >= 0x30 and <= 0x39 => ((char)virtualKey).ToString(),
+            >= 0x70 and <= 0x7B => $"F{virtualKey - 0x70 + 1}",
+            _ => string.Empty,
+        };
+        return token.Length > 0;
+    }
+
     private static BridgeHotkeyDefinition DefaultOrFallback()
     {
         return Default;

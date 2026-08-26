@@ -50,7 +50,8 @@ public partial class MainWindow : Window
     private bool _isApplyingSelectedModel;
     private bool _isCapturingHotkey;
     private bool _isShowingVbCablePrompt;
-    private readonly List<string> _capturedHotkeyTokens = [];
+    private readonly BridgeHotkeyCaptureSession _hotkeyCaptureSession = new();
+    private readonly WindowsHotkeyCaptureService _hotkeyCaptureService = new();
     private AppSettings _settings = new();
     private string _modelOperationMessage = "切换模型后会重新加载识别引擎；模型文件保存在 ModelScope 本地缓存中。";
     private double _modelOperationProgress;
@@ -108,8 +109,6 @@ public partial class MainWindow : Window
         BridgeHotkeyEnabledBox.Click += (_, _) =>
             SetBridgeHotkeyEnabled(BridgeHotkeyEnabledBox.IsChecked == true);
         HotkeyCaptureButton.Click += (_, _) => StartHotkeyCapture();
-        AddHandler(KeyDownEvent, CaptureHotkeyKeyDown, RoutingStrategies.Tunnel);
-        AddHandler(KeyUpEvent, CaptureHotkeyKeyUp, RoutingStrategies.Tunnel);
         ModeBox.ItemsSource = RecognitionModeOptions;
         RefreshRecognitionModePicker();
         ModeBox.SelectionChanged += async (_, _) => await ApplyRecognitionModeAsync();
@@ -1202,6 +1201,7 @@ public partial class MainWindow : Window
 
     private void MinimizeButton_Click(object? sender, RoutedEventArgs e)
     {
+        CancelHotkeyCapture();
         Hide();
     }
 
@@ -1324,58 +1324,69 @@ public partial class MainWindow : Window
             return;
         }
 
-        _capturedHotkeyTokens.Clear();
+        _hotkeyCaptureSession.Reset();
         _isCapturingHotkey = true;
         HotkeyCaptureButton.Content = "请同时按键…";
         HotkeyCaptureHint.Text = "正在录制：按下一个或多个按键；Esc 取消";
         UpdateHotkeyButtonsEnabled();
         HotkeyCaptureButton.Focus();
-    }
-
-    private void CaptureHotkeyKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (!_isCapturingHotkey)
+        try
         {
-            return;
+            _hotkeyCaptureService.Start(QueueHotkeyCaptureEvent);
         }
-
-        if (e.Key == Key.Escape)
+        catch (Exception ex)
         {
             CancelHotkeyCapture();
-            e.Handled = true;
-            return;
+            AppLogger.Error("Hotkey capture hook failed", ex);
+            SetStatus($"● 无法开始快捷键录入：{ex.Message}", "#C13830", "#FFF1F0");
         }
-
-        var eventToken = BridgeHotkeyDefinition.TryGetToken(e.Key, out var token)
-            ? token
-            : null;
-        var pressedTokens = BridgeHotkeyCapture.ResolveKeyDownTokens(
-            BridgeHotkeyCapture.GetPressedTokens(),
-            eventToken);
-        foreach (var pressedToken in pressedTokens)
-        {
-            if (!_capturedHotkeyTokens.Contains(pressedToken, StringComparer.OrdinalIgnoreCase))
-            {
-                _capturedHotkeyTokens.Add(pressedToken);
-            }
-        }
-
-        HotkeyCaptureButton.Content = string.Join(" + ", _capturedHotkeyTokens);
-        HotkeyCaptureHint.Text = _capturedHotkeyTokens.Count >= 1
-            ? "松开任意按键即可保存"
-            : "请按下一个受支持的按键";
-        e.Handled = true;
     }
 
-    private void CaptureHotkeyKeyUp(object? sender, KeyEventArgs e)
+    private void QueueHotkeyCaptureEvent(HotkeyCaptureEvent captureEvent)
+    {
+        Dispatcher.UIThread.Post(() => HandleHotkeyCaptureEvent(captureEvent));
+    }
+
+    private void HandleHotkeyCaptureEvent(HotkeyCaptureEvent captureEvent)
     {
         if (!_isCapturingHotkey)
         {
             return;
         }
 
-        e.Handled = true;
-        if (!BridgeHotkeyDefinition.TryCreate(_capturedHotkeyTokens, out var hotkey))
+        if (captureEvent.CancelRequested)
+        {
+            CancelHotkeyCapture();
+            return;
+        }
+
+        if (captureEvent.IsKeyDown)
+        {
+            _hotkeyCaptureSession.Observe(captureEvent.Token);
+        }
+
+        UpdateHotkeyCapturePreview();
+        if (!captureEvent.IsKeyDown
+            && captureEvent.AllKeysReleased
+            && _hotkeyCaptureSession.Tokens.Count > 0)
+        {
+            CompleteHotkeyCapture();
+        }
+    }
+
+    private void UpdateHotkeyCapturePreview()
+    {
+        HotkeyCaptureButton.Content = _hotkeyCaptureSession.Tokens.Count > 0
+            ? string.Join(" + ", _hotkeyCaptureSession.Tokens)
+            : "请同时按键…";
+        HotkeyCaptureHint.Text = _hotkeyCaptureSession.Tokens.Count >= 1
+            ? "录制中，全部松开后自动保存"
+            : "请按下一个受支持的按键";
+    }
+
+    private void CompleteHotkeyCapture()
+    {
+        if (!BridgeHotkeyDefinition.TryCreate(_hotkeyCaptureSession.Tokens, out var hotkey))
         {
             CancelHotkeyCapture();
             SetStatus("● 快捷键至少需要一个受支持的按键", "#C13830", "#FFF1F0");
@@ -1386,7 +1397,8 @@ public partial class MainWindow : Window
         _weTypeHotkey.SetHotkey(hotkey.ForSession(_settings.BridgeHotkeyEnabled));
         SaveSettings();
         _isCapturingHotkey = false;
-        _capturedHotkeyTokens.Clear();
+        _hotkeyCaptureService.Stop();
+        _hotkeyCaptureSession.Reset();
         HotkeyCaptureButton.Content = hotkey.DisplayName;
         HotkeyCaptureHint.Text = "点击右侧按键，可录入一个或多个按键；Esc 取消";
         SetStatus($"● 已保存按住说话快捷键：{hotkey.DisplayName}", "#1769E0", "#EEF6FF");
@@ -1430,7 +1442,8 @@ public partial class MainWindow : Window
         }
 
         _isCapturingHotkey = false;
-        _capturedHotkeyTokens.Clear();
+        _hotkeyCaptureService.Stop();
+        _hotkeyCaptureSession.Reset();
         HotkeyCaptureButton.Content = BridgeHotkeyDefinition.Parse(_settings.BridgeHotkey).DisplayName;
         HotkeyCaptureHint.Text = "点击右侧按键，可录入一个或多个按键；Esc 取消";
         UpdateHotkeyButtonsEnabled();
@@ -1924,6 +1937,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        CancelHotkeyCapture();
         if (!_allowClose)
         {
             e.Cancel = true;
@@ -1940,6 +1954,7 @@ public partial class MainWindow : Window
         _server.Dispose();
         _weTypeBridge.Dispose();
         _weTypeHotkey.Dispose();
+        _hotkeyCaptureService.Dispose();
         _audioOutput.Dispose();
         _asrService.Dispose();
         _trayIcon.Dispose();
