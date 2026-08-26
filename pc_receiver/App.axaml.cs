@@ -15,7 +15,8 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            var startMinimized = StartupService.IsStartupLaunch(desktop.Args);
+            desktop.MainWindow = new MainWindow(startMinimized);
         }
 
         base.OnFrameworkInitializationCompleted();

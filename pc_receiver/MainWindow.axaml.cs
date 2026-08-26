@@ -39,6 +39,8 @@ public partial class MainWindow : Window
     private readonly NativeMenuItem _trayStopItem;
     private readonly NativeMenuItem _trayStartupItem;
     private const double TopDragHeight = 156;
+    private readonly bool _startMinimized;
+    private bool _initialVisibilityApplied;
     private bool _allowClose;
     private bool _isRecognizing;
     private bool _isAsrReady;
@@ -56,8 +58,13 @@ public partial class MainWindow : Window
 
     private event Action? ModelOperationChanged;
 
-    public MainWindow()
+    public MainWindow() : this(false)
     {
+    }
+
+    public MainWindow(bool startMinimized)
+    {
+        _startMinimized = startMinimized;
         WindowDecorations = WindowDecorations.None;
         CanResize = false;
         Topmost = false;
@@ -77,6 +84,13 @@ public partial class MainWindow : Window
                 .ForSession(_settings.BridgeHotkeyEnabled));
         _weTypeBridge = new WeTypeBridgeSession(_audioOutput, _weTypeHotkey);
         InitializeComponent();
+        if (_startMinimized)
+        {
+            // Avoid a taskbar/window flash before the first Opened event hides
+            // the application in the notification area.
+            ShowInTaskbar = false;
+            Opacity = 0;
+        }
         Surface.AddHandler(PointerPressedEvent, DragWindowFromTopArea, RoutingStrategies.Tunnel);
         TitleBar.AddHandler(PointerPressedEvent, DragWindow, RoutingStrategies.Tunnel);
         SetAppImages();
@@ -924,9 +938,27 @@ public partial class MainWindow : Window
 
     private void RestoreWindow()
     {
+        ShowInTaskbar = true;
+        Opacity = 1;
         Show();
         WindowState = WindowState.Normal;
         Activate();
+    }
+
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+
+        if (!_startMinimized || _initialVisibilityApplied)
+        {
+            return;
+        }
+
+        _initialVisibilityApplied = true;
+        Hide();
+        Opacity = 1;
+        ShowInTaskbar = true;
+        AppLogger.Info("Application started minimized to tray by startup launch argument.");
     }
 
     private void SetStartupEnabled(bool enabled)
